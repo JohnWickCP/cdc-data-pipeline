@@ -34,7 +34,7 @@ Docker 29.x       - Containerization
 
 ### Bước 1: Clone repo
 ```bash
-git clone https://github.com/JohnWickCP/cdc-pipeline-mysql-kafka-spark-mongodb.git
+git clone https://github.com/JohnWickCP/cdc-data-pipeline.git
 cd cdc-pipeline-mysql-kafka-spark-mongodb
 ```
 
