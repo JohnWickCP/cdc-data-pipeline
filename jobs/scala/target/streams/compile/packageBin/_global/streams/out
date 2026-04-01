@@ -1,0 +1,13 @@
+[0m[[0m[0mdebug[0m] [0m[0mPackaging /home/mrwick/cdc-pipeline/jobs/scala/target/scala-2.12/cdc-mysql-to-mongodb-redis_2.12-1.0.jar ...[0m
+[0m[[0m[0mdebug[0m] [0m[0mInput file mappings:[0m
+[0m[[0m[0mdebug[0m] [0m[0m	CdcRedisConsumer.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	  /home/mrwick/cdc-pipeline/jobs/scala/target/scala-2.12/classes/CdcRedisConsumer.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	CdcRedisConsumer$$typecreator3$1.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	  /home/mrwick/cdc-pipeline/jobs/scala/target/scala-2.12/classes/CdcRedisConsumer$$typecreator3$1.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	CdcRedisConsumer$$typecreator1$1.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	  /home/mrwick/cdc-pipeline/jobs/scala/target/scala-2.12/classes/CdcRedisConsumer$$typecreator1$1.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	CdcRedisConsumer$$typecreator2$1.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	  /home/mrwick/cdc-pipeline/jobs/scala/target/scala-2.12/classes/CdcRedisConsumer$$typecreator2$1.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	CdcRedisConsumer$.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	  /home/mrwick/cdc-pipeline/jobs/scala/target/scala-2.12/classes/CdcRedisConsumer$.class[0m
+[0m[[0m[0mdebug[0m] [0m[0mDone packaging.[0m
