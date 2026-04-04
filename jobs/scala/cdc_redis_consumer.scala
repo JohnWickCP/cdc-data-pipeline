@@ -6,10 +6,10 @@ import org.apache.spark.sql.{Dataset, Row}
 import org.bson.Document
 import com.mongodb.client.MongoClients
 import com.mongodb.client.model.{Filters, ReplaceOptions}
-import redis.clients.jedis.Jedis
+import redis.clients.jedis.{Jedis, JedisPool, JedisPoolConfig}
 import java.util.Base64
 import java.math.BigInteger
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 object CdcRedisConsumer {
 
@@ -37,6 +37,19 @@ object CdcRedisConsumer {
   val MONGO_DB         = "inventory"
   val REDIS_HOST       = "cdc-redis"                    // 👈 Phải là cdc-redis
   val REDIS_PORT       = 6379
+
+  // Connection pool — tái sử dụng connection, không tạo mới mỗi partition
+  @transient lazy val mongoPool: com.mongodb.client.MongoClient = 
+    MongoClients.create(MONGO_URI)
+  
+  @transient lazy val jedisPool: redis.clients.jedis.JedisPool = {
+    val config = new redis.clients.jedis.JedisPoolConfig()
+    config.setMaxTotal(10)
+    config.setMaxIdle(5)
+    config.setMinIdle(2)
+    new redis.clients.jedis.JedisPool(config, REDIS_HOST, REDIS_PORT)
+  }
+
 
   val decodeDecimalUDF = udf((encoded: String) => {
     if (encoded == null) 0.0
@@ -69,11 +82,12 @@ object CdcRedisConsumer {
     if (batchDF.isEmpty) return
 
     println(s"\n=== Batch $batchId ===")
+    val _batchStart = System.currentTimeMillis()
 
     batchDF.foreachPartition { partition: Iterator[Row] =>
 
-      val mongoClient = MongoClients.create(MONGO_URI)
-      val jedis = new Jedis(REDIS_HOST, REDIS_PORT)
+      val mongoClient = mongoPool  // reuse pool
+      val jedis = jedisPool.getResource()
 
       val db = mongoClient.getDatabase(MONGO_DB)
       val customersCol = db.getCollection("customers")
@@ -152,10 +166,12 @@ object CdcRedisConsumer {
         }
 
         pipe.sync()
+        val _batchEnd = System.currentTimeMillis()
+        println(s"  [TIMING] total=${_batchEnd - _batchStart}ms")
 
       } finally {
-        jedis.close()
-        mongoClient.close()
+        jedis.close()  // return to pool
+        // mongoClient không close — reuse
       }
     }
   }
@@ -200,7 +216,7 @@ object CdcRedisConsumer {
 
     records.writeStream
       .outputMode("append")
-      .trigger(Trigger.ProcessingTime("5 seconds"))
+      .trigger(Trigger.ProcessingTime("1500 milliseconds"))
       .option("checkpointLocation", CHECKPOINT_PATH)
       .foreachBatch(processBatch _)
       .start()
