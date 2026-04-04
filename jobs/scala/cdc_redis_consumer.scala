@@ -95,8 +95,16 @@ object CdcRedisConsumer {
 
       val pipe = jedis.pipelined()
 
-      try {
-        partition.foreach { row =>
+      val rows = partition.toList
+        val tRead = System.currentTimeMillis()
+
+        var mongoMs = 0L
+        var redisMs = 0L
+        var rowCount = 0
+
+        try {
+        rows.foreach { row =>
+          rowCount += 1
 
           val op = row.getAs[String]("op")
           val table = row.getAs[String]("table")
@@ -115,11 +123,13 @@ object CdcRedisConsumer {
                 .append("name", name)
                 .append("email", email)
 
+              val _tm1 = System.currentTimeMillis()
               customersCol.replaceOne(
                 Filters.eq("_id", id),
                 doc,
                 new ReplaceOptions().upsert(true)
               )
+              mongoMs += System.currentTimeMillis() - _tm1
 
               val hashData = Map(
                 "id" -> id.toString,
@@ -165,9 +175,11 @@ object CdcRedisConsumer {
           }
         }
 
+        val _tRedis = System.currentTimeMillis()
         pipe.sync()
+        redisMs += System.currentTimeMillis() - _tRedis
         val _batchEnd = System.currentTimeMillis()
-        println(s"  [TIMING] total=${_batchEnd - _batchStart}ms")
+        println(s"  [TIMING] total=${_batchEnd - _batchStart}ms | mongo=${mongoMs}ms | redis=${redisMs}ms | rows=${rowCount}")
 
       } finally {
         jedis.close()  // return to pool
