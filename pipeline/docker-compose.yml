@@ -139,7 +139,7 @@ services:
       start_period: 90s
 
   spark-master:
-    image: cdc-spark:4.0.0
+    image: cdc-spark:3.5.0
     build:
       context: ../spark
       dockerfile: Dockerfile
@@ -168,7 +168,7 @@ services:
       start_period: 40s
 
   spark-worker-1:
-    image: cdc-spark:4.0.0
+    image: cdc-spark:3.5.0
     build:
       context: ../spark
       dockerfile: Dockerfile
@@ -186,7 +186,7 @@ services:
       - ../jobs:/opt/spark/jobs
 
   spark-worker-2:
-    image: cdc-spark:4.0.0
+    image: cdc-spark:3.5.0
     build:
       context: ../spark
       dockerfile: Dockerfile
@@ -205,7 +205,7 @@ services:
 
 
   spark-worker-3:
-    image: cdc-spark:4.0.0
+    image: cdc-spark:3.5.0
     build:
       context: ../spark
       dockerfile: Dockerfile

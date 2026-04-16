@@ -1,4 +1,0 @@
-[0m[[0m[31merror[0m] [0m[0m/home/mrwick/cdc-pipeline/jobs/scala/cdc_redis_consumer.scala:89:19: value foreach is not a member of Object[0m
-[0m[[0m[31merror[0m] [0m[0m        partition.foreach { row =>[0m
-[0m[[0m[31merror[0m] [0m[0m                  ^[0m
-[0m[[0m[31merror[0m] [0m[0mone error found[0m

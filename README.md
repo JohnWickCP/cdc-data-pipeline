@@ -16,31 +16,33 @@ pip3 install pymysql pymongo redis kafka-python prometheus-client --break-system
 
 ---
 
-## Khởi động lần đầu (hoặc sau khi tắt máy)
+## Khởi động (mọi tình huống)
 
-**Bước 1 — Khởi động toàn bộ hệ thống:**
-```bash
-cd ~/cdc-pipeline/pipeline
-docker compose up -d
-```
-Chờ khoảng **40 giây** cho tất cả service khởi động.
+Chỉ cần 2 lệnh — script tự xử lý mọi thứ còn lại:
 
-**Bước 2 — Kiểm tra tất cả đang chạy:**
 ```bash
-docker ps --format "table {{.Names}}\t{{.Status}}"
+cd ~/cdc-pipeline/pipeline && docker compose up -d
+cd ~/cdc-pipeline && bash reset_pipeline.sh
 ```
-Phải thấy 11 container, tất cả `Up` và `healthy`.
 
-**Bước 3 — Reset và khởi động pipeline:**
-```bash
-cd ~/cdc-pipeline
-bash reset_pipeline.sh
+Chờ khoảng **2-3 phút** là xong. Script tự động:
+- Detect và fix Kafka Cluster ID conflict (nếu có)
+- Khởi động container còn thiếu
+- Xóa state cũ, register Debezium connector
+- Khởi động Spark job + metrics exporter
+- Chờ MongoDB sync và báo kết quả
+
+**Kết quả mong đợi cuối script:**
 ```
-Script này tự động làm tất cả — chờ khoảng **1-2 phút** là xong.
+  MySQL      customers : 3
+  MongoDB    customers : 3
+  Redis      keys      : 11
+  ✅ Pipeline hoạt động bình thường — sẵn sàng demo!
+```
 
 ---
 
-## Sau khi reset_pipeline.sh chạy xong
+## Sau khi khởi động xong
 
 Mở trình duyệt vào các địa chỉ sau:
 
@@ -55,8 +57,7 @@ Mở trình duyệt vào các địa chỉ sau:
 ## Chạy bài test
 
 ```bash
-cd ~/cdc-pipeline
-python3 test_pipeline.py
+cd ~/cdc-pipeline && python3 test_pipeline.py
 ```
 
 Kết quả sẽ in ra màn hình và lưu vào file `test_report.txt`.
@@ -68,94 +69,53 @@ Kết quả sẽ in ra màn hình và lưu vào file `test_report.txt`.
 ```
 1. Bật máy, mở terminal
 2. cd ~/cdc-pipeline/pipeline && docker compose up -d
-3. Chờ 40 giây
-4. cd ~/cdc-pipeline && bash reset_pipeline.sh
-5. Chờ 1-2 phút
-6. Kiểm tra: MySQL customers = MongoDB customers = 3
-7. Mở http://localhost:3000 → đăng nhập Grafana
-8. Chạy python3 test_pipeline.py để kiểm tra
-9. Sẵn sàng demo!
+3. cd ~/cdc-pipeline && bash reset_pipeline.sh
+4. Chờ script chạy xong (~2-3 phút)
+5. Kiểm tra: MySQL customers = MongoDB customers = 3
+6. Mở http://localhost:3000 → đăng nhập Grafana (admin/admin)
+7. Chạy python3 test_pipeline.py để kiểm tra
+8. Sẵn sàng demo!
 ```
+
+> **Lưu ý:** Không cần chạy `docker compose up -d` nếu containers đã đang chạy.
+> `reset_pipeline.sh` tự detect và khởi động container còn thiếu.
 
 ---
 
 ## Nếu gặp sự cố
 
 ### Pipeline không chạy / Grafana không có data
+
 ```bash
 cd ~/cdc-pipeline && bash reset_pipeline.sh
 ```
-Chạy lại reset là giải pháp cho hầu hết mọi vấn đề.
+
+Chạy lại reset là giải pháp cho hầu hết mọi vấn đề — script tự xử lý các lỗi phổ biến.
 
 ---
 
-### Debezium lỗi "db history topic is missing"
-Xảy ra khi Kafka topics bị xóa nhưng Debezium vẫn còn nhớ state cũ.
+### Kafka bị lỗi Cluster ID conflict
 
-**Cách fix:**
+Xảy ra khi chạy `docker compose down -v` rồi `up` lại. `reset_pipeline.sh` tự detect và fix lỗi này. Nếu muốn fix thủ công:
+
 ```bash
-# Bước 1: Xóa connector cũ
-curl -s -X DELETE http://localhost:8083/connectors/mysql-inventory-connector
-
-# Bước 2: Restart Debezium
-docker restart cdc-debezium
-echo "Chờ 30s..."
-sleep 30
-
-# Bước 3: Register lại với recovery mode
-curl -s -X POST http://localhost:8083/connectors \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "mysql-inventory-connector",
-    "config": {
-      "connector.class": "io.debezium.connector.mysql.MySqlConnector",
-      "tasks.max": "1",
-      "database.hostname": "cdc-mysql",
-      "database.port": "3306",
-      "database.user": "root",
-      "database.password": "root",
-      "database.server.id": "184054",
-      "topic.prefix": "inventory",
-      "database.include.list": "inventory",
-      "table.include.list": "inventory.customers,inventory.orders",
-      "schema.history.internal.kafka.bootstrap.servers": "cdc-kafka:29092",
-      "schema.history.internal.kafka.topic": "schema-changes.inventory",
-      "schema.history.internal.store.only.captured.tables.ddl": "true",
-      "snapshot.mode": "schema_only_recovery",
-      "include.schema.changes": "true",
-      "key.converter": "org.apache.kafka.connect.json.JsonConverter",
-      "value.converter": "org.apache.kafka.connect.json.JsonConverter",
-      "key.converter.schemas.enable": "false",
-      "value.converter.schemas.enable": "false"
-    }
-  }'
-```
-
-Sau đó kiểm tra connector RUNNING chưa:
-```bash
-curl -s http://localhost:8083/connectors/mysql-inventory-connector/status \
-  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['tasks'][0]['state'])"
+cd ~/cdc-pipeline/pipeline
+docker compose down -v
+docker compose up -d
+# Chờ 60s rồi chạy reset
+cd ~/cdc-pipeline && bash reset_pipeline.sh
 ```
 
 ---
 
 ### Spark không sync data vào MongoDB
+
 ```bash
-# Dừng Spark
-docker exec cdc-spark-master bash -c "pkill -f CdcRedisConsumer 2>/dev/null; exit 0"
-sleep 3
-
-# Xóa checkpoint
-docker exec cdc-spark-master bash -c "rm -rf /tmp/spark-checkpoint"
-
-# Khởi động lại
-docker exec -d cdc-spark-master /bin/bash -c \
-  "/opt/spark/bin/spark-submit \
-    --class CdcRedisConsumer \
-    --master spark://cdc-spark-master:7077 \
-    /opt/spark/jobs/scala/target/scala-2.12/cdc-mysql-to-mongodb-redis_2.12-1.0.jar \
-    > /tmp/spark_metrics.log 2>&1"
+# Xem log Spark để biết lỗi cụ thể
+docker exec cdc-spark-master tail -50 /tmp/spark_metrics.log
 ```
+
+Nếu thấy lỗi `UnknownTopicOrPartitionException` → checkpoint cũ bị stale, chạy lại `reset_pipeline.sh` là xong.
 
 ---
 
@@ -175,6 +135,7 @@ docker logs cdc-debezium --tail 30
 ---
 
 ### Kiểm tra nhanh pipeline có hoạt động không
+
 ```bash
 # MySQL
 docker exec cdc-mysql mysql -uroot -proot -e "SELECT COUNT(*) FROM inventory.customers;"
@@ -192,8 +153,13 @@ curl -s http://localhost:8083/connectors/mysql-inventory-connector/status | pyth
 ---
 
 ### Tắt toàn bộ hệ thống
+
 ```bash
+# Giữ volumes (khuyến nghị — bật lại nhanh hơn)
 cd ~/cdc-pipeline/pipeline && docker compose down
+
+# Xóa sạch volumes (dùng khi muốn reset hoàn toàn)
+cd ~/cdc-pipeline/pipeline && docker compose down -v
 ```
 
 ---
@@ -203,6 +169,9 @@ cd ~/cdc-pipeline/pipeline && docker compose down
 ```
 cdc-pipeline/
 ├── demo/                  # Dữ liệu demo và connector config
+│   ├── connector.json     # Debezium connector config (snapshot.mode: initial)
+│   ├── demodata.sql       # Dữ liệu demo gốc (3 customers, 4 orders)
+│   └── init.sql           # Schema khởi tạo MySQL
 ├── docs/                  # Tài liệu và kịch bản demo
 ├── jobs/scala/            # Code Spark (Scala)
 ├── monitoring/            # Config Prometheus
@@ -240,6 +209,6 @@ Prometheus → Grafana (dashboard)
 | Chỉ số | Kết quả | Mục tiêu |
 |--------|---------|----------|
 | Accuracy | 8/8 passed | 100% |
-| End-to-end latency | ~5s | < 10s |
+| End-to-end latency | ~4.5s | < 10s |
 | Throughput | ~1.6 records/s | - |
-| Fault tolerance | Phục hồi sau 3s | - |
+| Fault tolerance | Phục hồi sau 4s | - |

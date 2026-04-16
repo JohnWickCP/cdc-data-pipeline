@@ -13,6 +13,7 @@
     "table.include.list": "inventory.customers,inventory.orders",
     "schema.history.internal.kafka.bootstrap.servers": "cdc-kafka:29092",
     "schema.history.internal.kafka.topic": "schema-changes.inventory",
+    "snapshot.mode": "initial",
     "include.schema.changes": "true",
     "key.converter": "org.apache.kafka.connect.json.JsonConverter",
     "value.converter": "org.apache.kafka.connect.json.JsonConverter",
