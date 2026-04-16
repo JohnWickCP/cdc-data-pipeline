@@ -20,7 +20,7 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SCALA_FILE="$SCRIPT_DIR/jobs/scala/cdc_redis_consumer.scala"
 BUILD_DIR="$SCRIPT_DIR/jobs/scala"
 JAR_PATH="/opt/spark/jobs/scala/target/scala-2.12/cdc-mysql-to-mongodb-redis_2.12-1.0.jar"
