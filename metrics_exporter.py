@@ -48,8 +48,8 @@ TOPICS = [
 # Benchmark JSON
 # =============================
 
-SCALABILITY_JSON = Path("/home/mrwick/cdc-pipeline/benchmark/results/scalability_report.json")
-SCALING_JSON = Path("/home/mrwick/cdc-pipeline/benchmark/results/scaling_results.json")
+SCALABILITY_JSON = Path(__file__).parent / "benchmark" / "results" / "scalability_report.json"
+SCALING_JSON = Path(__file__).parent / "benchmark" / "results" / "scaling_results.json"
 
 
 # =============================

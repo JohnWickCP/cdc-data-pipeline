@@ -164,7 +164,7 @@ object CdcRedisConsumer {
 
     val spark = SparkSession.builder()
       .appName("CDC-MySQL-To-MongoDB-Redis")
-      .master("local[*]") // 🔥 FIX để chạy local
+      // .master("local[*]") // Để trống, submit dùng --master flag
       .getOrCreate()
 
     spark.sparkContext.setLogLevel("WARN")

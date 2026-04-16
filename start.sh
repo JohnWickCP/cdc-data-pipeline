@@ -8,6 +8,19 @@
 
 set -e
 
+# ── Parse flags ──────────────────────────────────────
+USE_PYTHON=false
+for arg in "$@"; do
+    case "$arg" in
+        --python)     USE_PYTHON=true ;;
+        --help|-h)
+            echo "Usage: bash start.sh [--python]"
+            echo "  (no flag)  Dùng Scala JAR (mặc định, nhanh hơn)"
+            echo "  --python   Dùng file Python (jobs/python/cdc_pipeline.py)"
+            exit 0 ;;
+    esac
+done
+
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_DIR="$PROJECT_DIR/pipeline"
 DASHBOARD_JSON="$PROJECT_DIR/monitoring/grafana/dashboards/cdc_dashboard.json"
@@ -57,6 +70,22 @@ if [ "$RUNNING" -gt 0 ]; then
 else
     info "Cold start — khởi động tất cả services..."
     docker compose up -d 2>&1 | tail -5
+
+    # ── Auto-detect Kafka Cluster ID conflict ──
+    sleep 8
+    KAFKA_STATUS=$(docker inspect --format='{{.State.Status}}' cdc-kafka 2>/dev/null || echo "")
+    if [ "$KAFKA_STATUS" = "exited" ]; then
+        ERR_COUNT=$(docker logs cdc-kafka 2>&1 | grep -c "InconsistentClusterIdException" || true)
+        if [ "$ERR_COUNT" -gt 0 ]; then
+            warn "Phát hiện Kafka Cluster ID conflict — auto-fix..."
+            docker compose down 2>&1 | tail -2
+            docker volume rm pipeline_kafka_data pipeline_zookeeper_data 2>/dev/null || true
+            log "Đã xóa kafka_data + zookeeper_data volumes"
+            info "Khởi động lại..."
+            docker compose up -d 2>&1 | tail -5
+            sleep 10
+        fi
+    fi
 fi
 
 # ============================================================
@@ -218,13 +247,22 @@ fi
 docker exec cdc-spark-master rm -rf /tmp/spark-checkpoint/cdc-pipeline 2>/dev/null || true
 log "Đã xóa Spark checkpoint"
 
-info "Submit Spark streaming job..."
-docker exec -d cdc-spark-master /opt/spark/bin/spark-submit \
-    --master spark://cdc-spark-master:7077 \
-    --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.mongodb.spark:mongo-spark-connector_2.12:10.3.0 \
-    /opt/spark/jobs/python/cdc_pipeline.py
-
-log "Spark job submitted"
+if [ "$USE_PYTHON" = true ]; then
+    info "Submit Spark job (PYTHON mode)..."
+    docker exec -d cdc-spark-master /opt/spark/bin/spark-submit \
+        --master spark://cdc-spark-master:7077 \
+        --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.mongodb.spark:mongo-spark-connector_2.12:10.3.0 \
+        /opt/spark/jobs/python/cdc_pipeline.py
+    log "Spark job submitted (Python)"
+else
+    info "Submit Spark job (SCALA mode — mặc định)..."
+    docker exec -d cdc-spark-master /opt/spark/bin/spark-submit \
+        --class CdcRedisConsumer \
+        --master spark://cdc-spark-master:7077 \
+        --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.mongodb.spark:mongo-spark-connector_2.12:10.3.0,redis.clients:jedis:5.1.0 \
+        /opt/spark/jobs/cdc-mysql-to-mongodb-redis_2.12-1.0.jar
+    log "Spark job submitted (Scala JAR)"
+fi
 
 # ============================================================
 # 7. Đợi Spark xử lý batch đầu tiên
@@ -239,6 +277,8 @@ for i in $(seq 1 60); do
     if [ "$MC" -gt 0 ] 2>/dev/null; then
         log "Spark xử lý thành công — MongoDB: $MC customers"
         SPARK_OK=true
+        # Đợi thêm để executor register xong với master
+        sleep 10
         break
     fi
     if [ $((i % 10)) -eq 0 ]; then
