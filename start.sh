@@ -364,6 +364,14 @@ for p in data.get('panels', []):
     else
         warn "Không tìm được UID cũ trong dashboard"
     fi
+
+    # ── LUÔN restart Grafana để force reload dashboard ──
+    info "Restart Grafana để reload dashboard..."
+    cd "$COMPOSE_DIR"
+    docker compose restart grafana 2>&1 | tail -1
+    sleep 10
+    log "Grafana đã reload"
+    cd "$PROJECT_DIR"
 else
     if [ -z "$ACTUAL_UID" ]; then
         warn "Không lấy được Prometheus datasource UID từ Grafana"
