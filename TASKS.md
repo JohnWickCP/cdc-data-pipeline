@@ -94,6 +94,10 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 | Tạo .env.example | 2026-05-06 | |
 | Windows Git Bash compatibility | 2026-05-06 | python3 fallback, awk fix |
 | Demo script + screenshots | 2026-05-06 | |
+| Benchmark quick mode (1.11) | 2026-05-07 | 100→90.7, 200→181.2, 500→403.6 rec/s E2E. RAM/Spark=0 là bugs riêng (2A.3, 2B.3) |
+| detect_hardware.sh | 2026-05-07 | Windows+Linux, privilege detection, sudo prompt (Linux), smart config calculator từ RAM/CPU |
+| start.sh auto-detect profile | 2026-05-07 | Tự chọn laptop/server/vm nếu không truyền --profile |
+| start.sh override flags | 2026-05-07 | --partitions=N, --kafka-heap=Xg, --spark-workers=N, --spark-memory=Xg, --spark-cores=N |
 
 ---
 
@@ -102,3 +106,4 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 | Ngày | Thay đổi |
 |---|---|
 | 2026-05-06 | Tạo file TASKS.md, tổng hợp từ KNOWN_ISSUES.md |
+| 2026-05-07 | Hoàn thành Phase 1 (1.11 benchmark). Thêm detect_hardware.sh + start.sh enhancements |
