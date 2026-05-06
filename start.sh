@@ -11,6 +11,9 @@ set -e
 # Ngăn Git Bash trên Windows tự động đổi đường dẫn Unix (/opt/...) thành đường dẫn C:/
 export MSYS_NO_PATHCONV=1
 
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+COMPOSE_DIR="$PROJECT_DIR/pipeline"
+
 # Tìm Python interpreter — dùng --version để test thật, tránh Windows Store stub
 # (python3 trên Windows có thể là stub redirect tới Microsoft Store, không chạy được)
 if python3 --version >/dev/null 2>&1; then
@@ -21,40 +24,183 @@ else
     PYTHON=python3
 fi
 
-# ── Parse flags ──────────────────────────────────────
+# ── Auto-detect hardware profile ──────────────────────────
+# Chạy khi --profile không được truyền vào.
+# Trả về: laptop | server | vm
+auto_detect_profile() {
+    local os battery ram_gb virt
+    os=$(uname -s 2>/dev/null || echo "unknown")
+
+    # Battery → laptop?
+    case "$os" in
+        MINGW*|MSYS*|CYGWIN*)
+            local bs
+            bs=$(wmic path Win32_Battery get BatteryStatus /value 2>/dev/null \
+                | tr -d '\r' | grep "^BatteryStatus=" | cut -d= -f2 | xargs)
+            [ -n "$bs" ] && battery="yes" || battery="no"
+            ;;
+        Linux*)
+            ls /sys/class/power_supply/ 2>/dev/null | grep -qi "bat" \
+                && battery="yes" || battery="no"
+            ;;
+        *) battery="no" ;;
+    esac
+
+    # RAM (GB)
+    case "$os" in
+        MINGW*|MSYS*|CYGWIN*)
+            local bytes
+            bytes=$(wmic computersystem get TotalPhysicalMemory /value 2>/dev/null \
+                | tr -d '\r' | grep "^TotalPhysicalMemory=" | cut -d= -f2 | xargs)
+            [[ "$bytes" =~ ^[0-9]+$ ]] \
+                && ram_gb=$(( bytes / 1024 / 1024 / 1024 )) || ram_gb=0
+            ;;
+        Linux*)
+            local mb
+            mb=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}' || echo "0")
+            ram_gb=$(( mb / 1024 ))
+            ;;
+        *) ram_gb=0 ;;
+    esac
+
+    # Virtualization
+    case "$os" in
+        MINGW*|MSYS*|CYGWIN*)
+            local combined
+            combined=$(wmic computersystem get model,manufacturer /value 2>/dev/null \
+                | tr -d '\r' | tr '[:upper:]' '[:lower:]')
+            case "$combined" in
+                *virtualbox*|*vmware*|*"hyper-v"*|*"virtual machine"*|*kvm*|*qemu*)
+                    virt="vm" ;;
+                *) virt="none" ;;
+            esac
+            ;;
+        Linux*)
+            local sdv
+            sdv=$(systemd-detect-virt 2>/dev/null || echo "none")
+            if [ "$sdv" != "none" ] && [ -n "$sdv" ]; then
+                virt="vm"
+            elif grep -q "hypervisor" /proc/cpuinfo 2>/dev/null; then
+                virt="vm"
+            else
+                virt="none"
+            fi
+            ;;
+        *) virt="none" ;;
+    esac
+
+    # Pick profile
+    if [ "$virt" = "vm" ]; then
+        echo "vm"
+    elif [ "$battery" = "yes" ]; then
+        echo "laptop"
+    elif [ "$ram_gb" -ge 32 ] 2>/dev/null; then
+        echo "server"
+    else
+        echo "laptop"
+    fi
+}
+
+# ── Apply env override (portable, không dùng sed -i) ──────
+# Sửa hoặc thêm KEY=VALUE vào file .env
+apply_override() {
+    local key="$1" value="$2" file="$3"
+    local tmp="${file}.tmp"
+    grep -v "^${key}=" "$file" > "$tmp" 2>/dev/null || cp "$file" "$tmp"
+    echo "${key}=${value}" >> "$tmp"
+    mv "$tmp" "$file"
+}
+
+# ── Parse flags ──────────────────────────────────────────
 USE_PYTHON=false
 HW_PROFILE=""
+OVR_PARTITIONS=""
+OVR_KAFKA_HEAP=""
+OVR_SPARK_WORKERS=""
+OVR_SPARK_MEMORY=""
+OVR_SPARK_CORES=""
+
 for arg in "$@"; do
     case "$arg" in
-        --python)     USE_PYTHON=true ;;
-        --profile=*)
-            HW_PROFILE="${arg#--profile=}"
-            PROFILE_FILE="$(cd "$(dirname "$0")" && pwd)/pipeline/.env.$HW_PROFILE"
-            if [ ! -f "$PROFILE_FILE" ]; then
-                echo "Lỗi: Không tìm thấy profile '$PROFILE_FILE'"
-                echo "Profile có sẵn: laptop, server, vm"
-                exit 1
-            fi
-            echo "📂 Áp dụng profile phần cứng: $HW_PROFILE"
-            cp "$PROFILE_FILE" "$(cd "$(dirname "$0")" && pwd)/pipeline/.env"
-            ;;
+        --python)          USE_PYTHON=true ;;
+        --profile=*)       HW_PROFILE="${arg#--profile=}" ;;
+        --partitions=*)    OVR_PARTITIONS="${arg#--partitions=}" ;;
+        --kafka-heap=*)    OVR_KAFKA_HEAP="${arg#--kafka-heap=}" ;;
+        --spark-workers=*) OVR_SPARK_WORKERS="${arg#--spark-workers=}" ;;
+        --spark-memory=*)  OVR_SPARK_MEMORY="${arg#--spark-memory=}" ;;
+        --spark-cores=*)   OVR_SPARK_CORES="${arg#--spark-cores=}" ;;
         --help|-h)
-            echo "Usage: bash start.sh [--python] [--profile=NAME]"
-            echo "  (no flag)          Dùng Scala JAR (mặc định, nhanh hơn)"
-            echo "  --python           Dùng file Python (jobs/python/cdc_pipeline.py)"
-            echo "  --profile=NAME     Load cấu hình tài nguyên: laptop | server | vm"
+            echo "Usage: bash start.sh [OPTIONS]"
+            echo ""
+            echo "Chế độ job:"
+            echo "  (mặc định)             Scala JAR (nhanh hơn)"
+            echo "  --python               PySpark (jobs/python/cdc_pipeline.py)"
+            echo ""
+            echo "Profile phần cứng:"
+            echo "  --profile=NAME         laptop | server | vm"
+            echo "  (không truyền)         Tự động detect từ phần cứng"
+            echo ""
+            echo "Override tham số (áp dụng sau khi load profile):"
+            echo "  --partitions=N         Số Kafka partitions"
+            echo "  --kafka-heap=Xg        Kafka broker heap (vd: 2g)"
+            echo "  --spark-workers=N      Số Spark workers"
+            echo "  --spark-memory=Xg      Memory mỗi Spark worker (vd: 4g)"
+            echo "  --spark-cores=N        CPU cores mỗi Spark worker"
             echo ""
             echo "Ví dụ:"
-            echo "  bash start.sh                      # chạy với cấu hình hiện tại"
-            echo "  bash start.sh --profile=server     # switch sang server rồi chạy"
-            echo "  bash start.sh --python --profile=laptop"
+            echo "  bash start.sh"
+            echo "  bash start.sh --profile=server"
+            echo "  bash start.sh --profile=laptop --partitions=3 --spark-memory=6g"
+            echo "  bash start.sh --python --spark-cores=3"
+            echo ""
+            echo "Xem detect_hardware.sh để biết cấu hình phù hợp với máy."
             exit 0 ;;
+        *)
+            echo "Flag không nhận ra: $arg  (dùng --help để xem usage)"
+            exit 1 ;;
     esac
 done
 
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-COMPOSE_DIR="$PROJECT_DIR/pipeline"
-DASHBOARD_JSON="$PROJECT_DIR/monitoring/grafana/dashboards/cdc_dashboard.json"
+# ── Load profile ──────────────────────────────────────────
+if [ -z "$HW_PROFILE" ]; then
+    HW_PROFILE=$(auto_detect_profile)
+    echo "🔍 Auto-detect profile: ${HW_PROFILE}  (override bằng --profile=X)"
+fi
+
+PROFILE_FILE="$COMPOSE_DIR/.env.$HW_PROFILE"
+if [ ! -f "$PROFILE_FILE" ]; then
+    echo "Lỗi: Không tìm thấy profile '$PROFILE_FILE'"
+    echo "Profile có sẵn: laptop, server, vm"
+    exit 1
+fi
+cp "$PROFILE_FILE" "$COMPOSE_DIR/.env"
+echo "📂 Profile: $HW_PROFILE"
+
+# ── Apply overrides ───────────────────────────────────────
+if [ -n "$OVR_PARTITIONS" ]; then
+    apply_override "KAFKA_NUM_PARTITIONS" "$OVR_PARTITIONS" "$COMPOSE_DIR/.env"
+    echo "  ↳ KAFKA_NUM_PARTITIONS=$OVR_PARTITIONS"
+fi
+if [ -n "$OVR_KAFKA_HEAP" ]; then
+    # Tính Xms = Xmx/2, vd 2g → -Xmx2g -Xms1g
+    local_num="${OVR_KAFKA_HEAP%g}"
+    local_xms=$(( local_num / 2 ))
+    [ "$local_xms" -lt 1 ] && local_xms=1
+    apply_override "KAFKA_HEAP_OPTS" "-Xmx${OVR_KAFKA_HEAP} -Xms${local_xms}g" "$COMPOSE_DIR/.env"
+    echo "  ↳ KAFKA_HEAP_OPTS=-Xmx${OVR_KAFKA_HEAP} -Xms${local_xms}g"
+fi
+if [ -n "$OVR_SPARK_WORKERS" ]; then
+    apply_override "SPARK_WORKER_COUNT" "$OVR_SPARK_WORKERS" "$COMPOSE_DIR/.env"
+    echo "  ↳ SPARK_WORKER_COUNT=$OVR_SPARK_WORKERS"
+fi
+if [ -n "$OVR_SPARK_MEMORY" ]; then
+    apply_override "SPARK_WORKER_MEMORY" "$OVR_SPARK_MEMORY" "$COMPOSE_DIR/.env"
+    echo "  ↳ SPARK_WORKER_MEMORY=$OVR_SPARK_MEMORY"
+fi
+if [ -n "$OVR_SPARK_CORES" ]; then
+    apply_override "SPARK_WORKER_CORES" "$OVR_SPARK_CORES" "$COMPOSE_DIR/.env"
+    echo "  ↳ SPARK_WORKER_CORES=$OVR_SPARK_CORES"
+fi
 
 # Colors
 GREEN='\033[0;32m'
@@ -74,6 +220,8 @@ echo -e "${BOLD}============================================${NC}"
 echo -e "${BOLD}  CDC Pipeline — Full Startup${NC}"
 echo -e "${BOLD}============================================${NC}"
 echo ""
+
+DASHBOARD_JSON="$PROJECT_DIR/monitoring/grafana/dashboards/cdc_dashboard.json"
 
 # ============================================================
 # 0. Dọn dẹp processes cũ trên host
