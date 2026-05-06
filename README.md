@@ -111,18 +111,55 @@ bash start.sh
 # Khởi động bằng PySpark (fallback nếu JAR có vấn đề)
 bash start.sh --python
 
+# Chọn hardware profile (auto-detect nếu không truyền)
+bash start.sh --profile=laptop   # hoặc server, vm
+
 # Dừng pipeline, giữ nguyên data
 bash stop.sh
 
 # Dừng pipeline + xóa toàn bộ data (volumes)
 bash stop.sh -v
 
+# Smoke test
+bash test_smoke.sh
+
 # Chạy benchmark E2E TPS (quick mode ~3 phút)
 bash run_bench.sh
 
 # Chạy benchmark full (~10 phút, dùng cho báo cáo)
 bash run_bench.sh full
+
+# So sánh các lần chạy benchmark
+python benchmark/compare_runs.py -n 5
 ```
+
+---
+
+## Live Demo Dashboard
+
+Dashboard tương tác để demo cho hội đồng — nhấn nút, xem metrics chạy real-time.
+
+```bash
+# Cài dependencies (1 lần)
+pip install -r requirements-host.txt
+
+# Chạy demo server
+bash demo/run_demo.sh       # Linux / Mac / Git Bash
+# hoặc
+demo\run_demo.bat            # Windows CMD
+
+# Mở browser
+# http://localhost:8888
+```
+
+**Tính năng:**
+- Nút **▶ START DEMO** với rate selector (50 / 100 / 200 / 500 records/s)
+- 5 stat cards: MySQL · MongoDB · Kafka · Redis · Spark Batch
+- Live Chart.js chart: MySQL insert rate vs MongoDB sync rate (cửa sổ 2 phút)
+- Bảng records MongoDB (email đã mask) + Redis state live
+- Tự động refresh mỗi 2 giây
+
+**Chạy trên máy khác:** copy `demo/.env.example` → `demo/.env`, đổi `127.0.0.1` thành IP máy chạy pipeline.
 
 ---
 
@@ -131,20 +168,30 @@ bash run_bench.sh full
 ```
 cdc-data-pipeline/
 │
-├── start.sh                    # Khởi động toàn bộ pipeline (script chính)
-├── stop.sh                     # Dừng pipeline
-├── run_bench.sh                # Chạy benchmark nhanh
-├── demo.sh                     # Script demo đầy đủ
-├── README.md                   # File này
-├── KNOWN_ISSUES.md             # Danh sách vấn đề đã biết + trạng thái
-├── .gitignore
+├── start.sh                    # ▶ Khởi động toàn bộ pipeline (~3-5 phút)
+├── stop.sh                     # ■ Dừng pipeline (stop.sh -v để xóa data)
+├── test_smoke.sh               # ✓ Smoke test 43 checks
+├── run_bench.sh                # 📊 Chạy benchmark (quick/full/stress/realistic)
+├── detect_hardware.sh          # 🖥 Phát hiện cấu hình máy, gợi ý profile
+├── requirements-host.txt       # Python deps cho demo server (host-side)
+├── README.md
+├── TASKS.md                    # Task tracking
 │
 ├── pipeline/
-│   └── docker-compose.yml      # Định nghĩa 12 containers
+│   ├── docker-compose.yml      # 12 containers
+│   ├── .env.laptop             # Profile: laptop ≥16GB RAM
+│   ├── .env.server             # Profile: server ≥32GB RAM
+│   └── .env.vm                 # Profile: cloud VM
 │
 ├── demo/
+│   ├── demo_server.py          # 🌐 Live demo dashboard backend (Flask)
+│   ├── index.html              # Dashboard UI (dark-theme, Chart.js)
+│   ├── run_demo.sh             # Chạy demo server (Linux/Mac/Git Bash)
+│   ├── run_demo.bat            # Chạy demo server (Windows)
+│   ├── .env.example            # Config demo server (copy → .env)
+│   ├── requirements.txt        # Flask + pymysql + pymongo + redis
 │   ├── connector.json          # Cấu hình Debezium MySQL connector
-│   ├── init.sql                # MySQL schema khởi tạo
+│   ├── init.sql                # MySQL schema
 │   └── demodata.sql            # Dữ liệu mẫu
 │
 ├── jobs/
@@ -153,33 +200,35 @@ cdc-data-pipeline/
 │   │   └── cdc_pipeline.py     # PySpark job (fallback)
 │   └── scala/
 │       ├── cdc_redis_consumer.scala
-│       ├── build.sbt
-│       └── README-scala.md
+│       └── build.sbt
 │
 ├── benchmark/
-│   ├── run_benchmark_v4.py     # Script đo E2E TPS (chạy trong Docker)
-│   ├── tps_benchmark.py        # Script đo TPS đơn giản
-│   ├── benchmark_scaling.sh    # Test scale theo partition/worker
+│   ├── run_benchmark_v4.py     # Script đo E2E TPS (quick/full/stress/realistic/partition)
+│   ├── compare_runs.py         # So sánh nhiều lần chạy từ history.jsonl
 │   └── results/                # Kết quả benchmark (gitignored, trừ .gitkeep)
+│                               # → history.jsonl: lịch sử compact tất cả runs
 │
 ├── monitoring/
 │   ├── prometheus.yml          # Cấu hình Prometheus scrape
 │   ├── exporter/
-│   │   ├── metrics_exporter.py # Thu thập metrics từ MySQL/Mongo/Redis/Kafka
+│   │   ├── metrics_exporter.py # Thu thập metrics từ MySQL/Mongo/Redis/Kafka/Spark
 │   │   ├── Dockerfile
-│   │   ├── requirements.txt
-│   │   └── .env                # Biến môi trường (xem .env để biết các key)
+│   │   └── requirements.txt
 │   └── grafana/
-│       ├── dashboards/         # JSON dashboard
+│       ├── dashboards/
+│       │   └── cdc_fixed1.json # Dashboard chính (uid: cdc-pipeline-main)
 │       └── provisioning/       # Auto-provision datasource + dashboard
 │
 ├── spark/
-│   └── Dockerfile              # Custom Spark 3.5.0 image với JAR dependencies
+│   └── Dockerfile              # Custom Spark 3.5.0 image
 │
 └── docs/
-    ├── DEMO_SCRIPT.md          # Kịch bản demo 8 phút cho thầy hướng dẫn
-    ├── SPARK_SETUP.md          # Chi tiết Spark job và cách hoạt động
-    └── VM_SETUP.md             # Deploy lên cloud VM để benchmark scale
+    ├── DEMO_SCRIPT.md          # Kịch bản demo cho thầy hướng dẫn
+    ├── LESSONS_LEARNED.md      # Vấn đề thực tế gặp phải + bài học
+    ├── CLARIFICATIONS.md       # Giải thích các khái niệm dễ nhầm
+    ├── KNOWN_ISSUES.md         # Vấn đề đã biết
+    ├── SPARK_SETUP.md          # Chi tiết Spark job
+    └── VM_SETUP.md             # Deploy lên cloud VM
 ```
 
 ---

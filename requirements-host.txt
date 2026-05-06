@@ -1,0 +1,12 @@
+# Host-side Python requirements
+# Pipeline chạy trong Docker — host không cần pip install để RUN pipeline.
+#
+# Chỉ cần cài nếu bạn chạy demo server:
+#   pip install -r requirements-host.txt
+#
+# (hoặc cd demo && pip install -r requirements.txt — cùng nội dung)
+
+flask>=2.3.0
+pymysql>=1.1.0
+pymongo>=4.6.0
+redis>=5.0.0
