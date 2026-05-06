@@ -213,6 +213,95 @@ detect_virt() {
     fi
 }
 
+# ── Smart Settings Calculator ─────────────────────────────
+# Tính cấu hình tối ưu dựa trên RAM và CPU thực tế của máy.
+# Sets global SMART_* variables — không in gì ra stdout.
+calc_smart_settings() {
+    local ram_gb=$1 cpu_cores=$2
+
+    # Fallback nếu detect thất bại
+    [[ "$ram_gb"    =~ ^[0-9]+$ ]] || ram_gb=8
+    [[ "$cpu_cores" =~ ^[0-9]+$ ]] || cpu_cores=4
+
+    # ── RAM budget (GB) ───────────────────────────────────
+    # Overhead cố định: OS + Docker daemon + Redis + Prometheus + Grafana
+    #                   + Zookeeper + Exporter + Debezium bookkeeping
+    local overhead=3
+
+    # Kafka broker heap: ~10% RAM, giữ trong [1, 4] GB
+    local kafka_gb=$(( ram_gb / 10 ))
+    [ "$kafka_gb" -lt 1 ] && kafka_gb=1
+    [ "$kafka_gb" -gt 4 ] && kafka_gb=4
+
+    # MySQL InnoDB buffer: ~12.5% RAM, giữ trong [0.5, 4] GB
+    # (dưới 1GB thì dùng 512M vẫn đủ cho workload test)
+    local mysql_gb=$(( ram_gb / 8 ))
+    [ "$mysql_gb" -lt 1 ] && mysql_gb=0   # 0 → sẽ output "512M"
+    [ "$mysql_gb" -gt 4 ] && mysql_gb=4
+
+    # MongoDB WiredTiger cache: ~6% RAM, giữ trong [1, 4] GB
+    local mongo_gb=$(( ram_gb / 16 ))
+    [ "$mongo_gb" -lt 1 ] && mongo_gb=1
+    [ "$mongo_gb" -gt 4 ] && mongo_gb=4
+
+    # Debezium Connect heap (MB): ~3% RAM, giữ trong [256m, 1g]
+    local debezium_mb=$(( ram_gb * 1024 / 32 ))
+    [ "$debezium_mb" -lt 256  ] && debezium_mb=256
+    [ "$debezium_mb" -gt 1024 ] && debezium_mb=1024
+
+    # ── Spark: phần RAM còn lại sau khi trừ hết ──────────
+    # (dùng 1GB thay 0.5GB cho mysql nếu mysql_gb=0, để budget an toàn)
+    local mysql_budget=$([ "$mysql_gb" -eq 0 ] && echo 1 || echo "$mysql_gb")
+    local debezium_budget=$(( debezium_mb / 1024 + 1 ))   # làm tròn lên
+    local allocated=$(( overhead + kafka_gb + mysql_budget + mongo_gb + debezium_budget ))
+    local spark_total=$(( ram_gb - allocated ))
+    [ "$spark_total" -lt 3 ] && spark_total=3  # tối thiểu 1g/worker
+
+    local workers=3   # giữ 3 worker (docker-compose hiện tại)
+    local spark_per_worker=$(( spark_total / workers ))
+    [ "$spark_per_worker" -lt 1 ] && spark_per_worker=1
+
+    # ── CPU: trừ 2 cores cho OS, chia đều cho workers ────
+    local usable_cores=$(( cpu_cores - 2 ))
+    [ "$usable_cores" -lt 1 ] && usable_cores=1
+    local cores_per_worker=$(( usable_cores / workers ))
+    [ "$cores_per_worker" -lt 1 ] && cores_per_worker=1
+
+    # ── Kafka partitions: scale theo cores ───────────────
+    # 1 partition nếu cpu < 8 cores; 3 partition nếu đủ mạnh
+    local partitions=1
+    [ "$cpu_cores" -ge 8 ] && partitions=3
+
+    # ── Set global SMART_* ────────────────────────────────
+    SMART_SPARK_WORKERS=$workers
+    SMART_SPARK_CORES=$cores_per_worker
+    SMART_SPARK_MEM="${spark_per_worker}g"
+    SMART_SPARK_TOTAL_RAM="${spark_total}g"
+
+    if [ "$kafka_gb" -eq 1 ]; then
+        SMART_KAFKA_HEAP="-Xmx1g -Xms512m"
+    else
+        SMART_KAFKA_HEAP="-Xmx${kafka_gb}g -Xms$(( kafka_gb / 2 ))g"
+    fi
+
+    SMART_PARTITIONS=$partitions
+    SMART_MYSQL_BUFFER="$([ "$mysql_gb" -eq 0 ] && echo "512M" || echo "${mysql_gb}G")"
+    SMART_MONGO_CACHE="${mongo_gb}GB"
+
+    if [ "$debezium_mb" -lt 1024 ]; then
+        SMART_DEBEZIUM_HEAP="-Xmx${debezium_mb}m -Xms$(( debezium_mb / 2 ))m"
+    else
+        SMART_DEBEZIUM_HEAP="-Xmx1g -Xms512m"
+    fi
+
+    # Lưu budget breakdown để hiển thị sau
+    SMART_BUDGET_OVERHEAD=$overhead
+    SMART_BUDGET_KAFKA=$kafka_gb
+    SMART_BUDGET_MYSQL="$([ "$mysql_gb" -eq 0 ] && echo "0.5" || echo "$mysql_gb")"
+    SMART_BUDGET_MONGO=$mongo_gb
+    SMART_BUDGET_SPARK=$spark_total
+}
+
 # ── Profile recommendation ────────────────────────────────
 recommend_profile() {
     local ram_gb=$1 battery=$2 virt=$3
@@ -296,6 +385,9 @@ printf "  %-20s %s\n"    "Battery:"        "$([ "$BATTERY" = "yes" ] && echo "c�
 echo ""
 [ "$RAM_GB" = "0" ] && warn "Không lấy được RAM — chạy lại với quyền cao để đọc đầy đủ."
 
+# ── Tính smart settings ───────────────────────────────────
+calc_smart_settings "$RAM_GB" "$CPU_CORES"
+
 # ── Profile đề xuất ───────────────────────────────────────
 RECOMMENDED=$(recommend_profile "$RAM_GB" "$BATTERY" "$VIRT")
 REASON=$(recommend_reason "$RAM_GB" "$BATTERY" "$VIRT")
@@ -303,6 +395,71 @@ REASON=$(recommend_reason "$RAM_GB" "$BATTERY" "$VIRT")
 section "Đề xuất profile"
 
 echo -e "  ${G}${BOLD}→ $RECOMMENDED${NC}   ($REASON)"
+
+# ── Cấu hình tối ưu theo phần cứng thực tế ───────────────
+section "Cấu hình tối ưu cho máy này"
+
+# Hiển thị RAM budget breakdown
+if [ "$RAM_GB" != "0" ]; then
+    echo -e "  ${BOLD}Phân bổ RAM (${RAM_GB}GB):${NC}"
+    printf "    %-28s %sGB\n" "OS + services dự trữ:"  "$SMART_BUDGET_OVERHEAD"
+    printf "    %-28s %sGB\n" "Kafka broker:"           "$SMART_BUDGET_KAFKA"
+    printf "    %-28s %sGB\n" "MySQL InnoDB buffer:"    "$SMART_BUDGET_MYSQL"
+    printf "    %-28s %sGB\n" "MongoDB WiredTiger:"     "$SMART_BUDGET_MONGO"
+    printf "    %-28s %s (%s workers × %s)\n" \
+        "Spark workers:" "$SMART_SPARK_TOTAL_RAM" "$SMART_SPARK_WORKERS" "$SMART_SPARK_MEM"
+    echo ""
+fi
+
+# Đọc preset của profile được đề xuất để so sánh
+case "$RECOMMENDED" in
+    laptop) P_WORKERS=3; P_CORES=4; P_MEM="2g"; P_KAFKA="-Xmx1g";    P_PARTS=1; P_MYSQL="512M" ;;
+    server) P_WORKERS=6; P_CORES=4; P_MEM="4g"; P_KAFKA="-Xmx2g";    P_PARTS=3; P_MYSQL="2G"   ;;
+    vm)     P_WORKERS=6; P_CORES=4; P_MEM="4g"; P_KAFKA="-Xmx2g";    P_PARTS=3; P_MYSQL="2G"   ;;
+esac
+
+# So sánh smart vs preset, tô màu nếu khác nhau
+cmp_val() {
+    local label="$1" smart="$2" preset="$3"
+    if [ "$smart" = "$preset" ]; then
+        printf "    %-26s ${G}%s${NC}  (= preset)\n" "$label:" "$smart"
+    else
+        printf "    %-26s ${G}%s${NC}  ${DIM}(preset: %s)${NC}\n" "$label:" "$smart" "$preset"
+    fi
+}
+
+echo -e "  ${BOLD}Tham số đề xuất vs preset '$RECOMMENDED':${NC}"
+cmp_val "Spark cores/worker"  "$SMART_SPARK_CORES"  "$P_CORES"
+cmp_val "Spark mem/worker"    "$SMART_SPARK_MEM"    "$P_MEM"
+cmp_val "Kafka heap"          "${SMART_KAFKA_HEAP%% *}"  "${P_KAFKA}"
+cmp_val "Kafka partitions"    "$SMART_PARTITIONS"   "$P_PARTS"
+cmp_val "MySQL buffer"        "$SMART_MYSQL_BUFFER" "$P_MYSQL"
+echo ""
+
+# Nếu có gì khác preset → gợi ý apply
+SMART_KAFKA_MAX="${SMART_KAFKA_HEAP%% *}"   # chỉ lấy phần -XmxNg để so sánh
+
+DIFFERS=false
+[ "$SMART_SPARK_CORES" != "$P_CORES"  ] && DIFFERS=true
+[ "$SMART_SPARK_MEM"   != "$P_MEM"    ] && DIFFERS=true
+[ "$SMART_PARTITIONS"  != "$P_PARTS"  ] && DIFFERS=true
+[ "$SMART_KAFKA_MAX"   != "$P_KAFKA"  ] && DIFFERS=true
+
+if [ "$DIFFERS" = "true" ]; then
+    echo -e "  ${Y}⚡ Có tham số khác preset. Để áp dụng, sửa pipeline/.env.$RECOMMENDED:${NC}"
+    [ "$SMART_SPARK_CORES" != "$P_CORES" ] && \
+        echo -e "    ${DIM}SPARK_WORKER_CORES=$SMART_SPARK_CORES${NC}"
+    [ "$SMART_SPARK_MEM" != "$P_MEM" ] && \
+        echo -e "    ${DIM}SPARK_WORKER_MEMORY=$SMART_SPARK_MEM${NC}"
+    [ "$SMART_KAFKA_MAX" != "$P_KAFKA" ] && \
+        echo -e "    ${DIM}KAFKA_HEAP_OPTS=$SMART_KAFKA_HEAP${NC}"
+    [ "$SMART_PARTITIONS" != "$P_PARTS" ] && \
+        echo -e "    ${DIM}KAFKA_NUM_PARTITIONS=$SMART_PARTITIONS${NC}"
+    echo ""
+else
+    ok "Preset '$RECOMMENDED' đã phù hợp với phần cứng này."
+    echo ""
+fi
 
 # ── So sánh profiles ──────────────────────────────────────
 section "So sánh profiles"
