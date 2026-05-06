@@ -33,7 +33,7 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 | 1.8 | Prometheus scrape thành công | ✅ | target cdc-pipeline health=up |
 | 1.9 | Grafana dashboard hiển thị data | ✅ | Xác nhận thủ công — hiển thị OK |
 | 1.10 | Metrics exporter trả về metrics | ✅ | 20+ metrics đúng, thấy rõ bug `cdc_redis_customers_total=5` |
-| 1.11 | Benchmark quick mode chạy được | ❌ | `bash run_bench.sh` |
+| 1.11 | Benchmark quick mode chạy được | ✅ | 100→90.7, 200→181.2, 500→403.6 rec/s E2E. RAM/Spark cores=0 là bugs riêng (2A.3, 2B.3) |
 | 1.12 | Smoke test script pass | ✅ | 43/43 PASS. Fix: Python stub, `|| true` fallback, `aliveworkers` là int không phải list |
 
 ---
