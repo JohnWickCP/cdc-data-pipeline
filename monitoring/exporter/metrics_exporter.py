@@ -192,10 +192,9 @@ lag_total = Gauge(
     "Record lag: MySQL customers - MongoDB customers"
 )
 
-# Spark batch duration không đo được từ bên ngoài, giữ gauge = 0 để benchmark không bị lỗi
 spark_batch_duration_ms = Gauge(
     "cdc_spark_batch_duration_ms",
-    "Spark batch duration ms (placeholder, requires Spark internal metrics)"
+    "Spark batch duration ms (triggerExecution from StreamingQueryListener via Redis)"
 )
 
 spark_executor_cores = Gauge(
@@ -284,6 +283,10 @@ def collect_redis():
 
         if top:
             redis_top_customer_score.set(top[0][1])
+
+        batch_dur = r.get("spark:batch_duration_ms")
+        if batch_dur is not None:
+            spark_batch_duration_ms.set(float(batch_dur))
 
         return True
 

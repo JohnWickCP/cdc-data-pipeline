@@ -60,7 +60,7 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 
 | # | Bug | Priority | Trạng thái | Ghi chú |
 |---|---|---|---|---|
-| 2C.1 | Spark batch duration luôn = 0ms | Medium | ❌ | Cần Spark REST API hoặc `StreamingQueryListener` |
+| 2C.1 | Spark batch duration luôn = 0ms | Medium | ✅ | `StreamingQueryListener` ghi `spark:batch_duration_ms` → Redis → exporter đọc. Test: 348ms→1284ms ✅ |
 
 ---
 
@@ -101,6 +101,7 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 | Phase 2A bug fixes | 2026-05-07 | 2A.1: TPS→records/s, 2A.2: trigger đã là 5s, 2A.3: free -m fix |
 | docs/CLARIFICATIONS.md | 2026-05-07 | Giải thích TPS vs records/s vs events/s, E2E đo gì, Redis counter bug, spark=0, ram_gb=0 |
 | Phase 2B bug fixes | 2026-05-07 | 2B.1: Redis counter fix (INSERT+DELETE+UPDATE test PASS), 2B.2: Grafana auto-restart, 2B.3: Spark executor metrics |
+| Phase 2C bug fixes | 2026-05-07 | 2C.1: StreamingQueryListener → Redis → exporter. batch_duration_ms thật: ~350–1300ms |
 
 ---
 
@@ -113,3 +114,4 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 | 2026-05-07 | Hoàn thành Phase 2A (2A.1: TPS→records/s, 2A.2: already fixed, 2A.3: ram_gb free -m fix) |
 | 2026-05-07 | Thêm docs/CLARIFICATIONS.md. Cập nhật CLAUDE.md: sửa gotchas sai, thêm quy tắc tự update TASKS.md |
 | 2026-05-07 | Hoàn thành Phase 2B (2B.1: Redis counter fix + rebuild JAR, 2B.2: Grafana restart, 2B.3: Spark executor metrics) |
+| 2026-05-07 | Hoàn thành Phase 2C (2C.1: StreamingQueryListener ghi batch duration vào Redis, exporter đọc thật) |

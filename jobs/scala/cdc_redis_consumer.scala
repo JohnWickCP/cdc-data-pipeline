@@ -1,7 +1,7 @@
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.streaming.Trigger
+import org.apache.spark.sql.streaming.{Trigger, StreamingQueryListener}
 import org.apache.spark.sql.{Dataset, Row}
 import org.bson.Document
 import com.mongodb.client.MongoClients
@@ -169,6 +169,23 @@ object CdcRedisConsumer {
       .getOrCreate()
 
     spark.sparkContext.setLogLevel("WARN")
+
+    spark.streams.addListener(new StreamingQueryListener {
+      override def onQueryStarted(event: StreamingQueryListener.QueryStartedEvent): Unit = {}
+
+      override def onQueryProgress(event: StreamingQueryListener.QueryProgressEvent): Unit = {
+        val triggerMs = Option(event.progress.durationMs.get("triggerExecution"))
+          .map(_.longValue()).getOrElse(0L)
+        if (triggerMs > 0) {
+          val jedis = new Jedis(REDIS_HOST, REDIS_PORT)
+          try { jedis.set("spark:batch_duration_ms", triggerMs.toString) }
+          finally { jedis.close() }
+        }
+      }
+
+      override def onQueryTerminated(event: StreamingQueryListener.QueryTerminatedEvent): Unit = {}
+    })
+
     import spark.implicits._
 
     val rawStream = spark.readStream
