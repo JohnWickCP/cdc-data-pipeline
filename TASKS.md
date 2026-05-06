@@ -98,6 +98,8 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 | detect_hardware.sh | 2026-05-07 | Windows+Linux, privilege detection, sudo prompt (Linux), smart config calculator từ RAM/CPU |
 | start.sh auto-detect profile | 2026-05-07 | Tự chọn laptop/server/vm nếu không truyền --profile |
 | start.sh override flags | 2026-05-07 | --partitions=N, --kafka-heap=Xg, --spark-workers=N, --spark-memory=Xg, --spark-cores=N |
+| Phase 2A bug fixes | 2026-05-07 | 2A.1: TPS→records/s, 2A.2: trigger đã là 5s, 2A.3: free -m fix |
+| docs/CLARIFICATIONS.md | 2026-05-07 | Giải thích TPS vs records/s vs events/s, E2E đo gì, Redis counter bug, spark=0, ram_gb=0 |
 
 ---
 
@@ -108,3 +110,4 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 | 2026-05-06 | Tạo file TASKS.md, tổng hợp từ KNOWN_ISSUES.md |
 | 2026-05-07 | Hoàn thành Phase 1 (1.11 benchmark). Thêm detect_hardware.sh + start.sh enhancements |
 | 2026-05-07 | Hoàn thành Phase 2A (2A.1: TPS→records/s, 2A.2: already fixed, 2A.3: ram_gb free -m fix) |
+| 2026-05-07 | Thêm docs/CLARIFICATIONS.md. Cập nhật CLAUDE.md: sửa gotchas sai, thêm quy tắc tự update TASKS.md |
