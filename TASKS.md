@@ -52,9 +52,9 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 
 | # | Bug | Priority | Trạng thái | File |
 |---|---|---|---|---|
-| 2B.1 | `customers:total` sai khi UPDATE/DELETE | High | ❌ | L117: incr chạy cả khi UPDATE (phải skip); L96-98: thiếu `decr` khi DELETE. `orders:total` cũng cùng vấn đề — `jobs/scala/cdc_redis_consumer.scala` |
-| 2B.2 | Grafana datasource UID mismatch sau `stop -v` | Medium | ❌ | `start.sh` (auto-patch chưa implement) |
-| 2B.3 | `executor_cores` và `executor_memory_mb` = 0 | Low | ❌ | `monitoring/exporter/metrics_exporter.py` |
+| 2B.1 | `customers:total` sai khi UPDATE/DELETE | High | ✅ | Fix: decr khi DELETE, gate incr trên op=c\|r. Test: INSERT 3→4, UPDATE giữ 4, DELETE 4→3 ✅ |
+| 2B.2 | Grafana datasource UID mismatch sau `stop -v` | Medium | ✅ | `start.sh` step 9: restart Grafana sau healthy để force reload provisioning |
+| 2B.3 | `executor_cores` và `executor_memory_mb` = 0 | Low | ✅ | `metrics_exporter.py`: thêm `collect_spark()` từ Spark Master REST API — cores=12, mem=3072MB |
 
 ### 2C — Hard (cần nghiên cứu thêm)
 
@@ -100,6 +100,7 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 | start.sh override flags | 2026-05-07 | --partitions=N, --kafka-heap=Xg, --spark-workers=N, --spark-memory=Xg, --spark-cores=N |
 | Phase 2A bug fixes | 2026-05-07 | 2A.1: TPS→records/s, 2A.2: trigger đã là 5s, 2A.3: free -m fix |
 | docs/CLARIFICATIONS.md | 2026-05-07 | Giải thích TPS vs records/s vs events/s, E2E đo gì, Redis counter bug, spark=0, ram_gb=0 |
+| Phase 2B bug fixes | 2026-05-07 | 2B.1: Redis counter fix (INSERT+DELETE+UPDATE test PASS), 2B.2: Grafana auto-restart, 2B.3: Spark executor metrics |
 
 ---
 
@@ -111,3 +112,4 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 | 2026-05-07 | Hoàn thành Phase 1 (1.11 benchmark). Thêm detect_hardware.sh + start.sh enhancements |
 | 2026-05-07 | Hoàn thành Phase 2A (2A.1: TPS→records/s, 2A.2: already fixed, 2A.3: ram_gb free -m fix) |
 | 2026-05-07 | Thêm docs/CLARIFICATIONS.md. Cập nhật CLAUDE.md: sửa gotchas sai, thêm quy tắc tự update TASKS.md |
+| 2026-05-07 | Hoàn thành Phase 2B (2B.1: Redis counter fix + rebuild JAR, 2B.2: Grafana restart, 2B.3: Spark executor metrics) |
