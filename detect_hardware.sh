@@ -3,10 +3,11 @@
 # detect_hardware.sh — Phát hiện phần cứng, đề xuất profile
 #
 # Hỗ trợ: Windows (Git Bash / MSYS2) + Linux
-# Không crash nếu thiếu quyền admin/root — fallback gracefully
+# Graceful fallback nếu thiếu quyền — Linux tự hỏi sudo pass
 #
 # Usage:
-#   bash detect_hardware.sh
+#   bash detect_hardware.sh          # chạy bình thường
+#   sudo bash detect_hardware.sh     # Linux: đọc đầy đủ DMI/VM info
 # ============================================================
 
 export MSYS_NO_PATHCONV=1
@@ -33,6 +34,47 @@ detect_os() {
 }
 
 OS=$(detect_os)
+
+# ── Privilege Detection & Escalation ──────────────────────
+ELEVATED=false
+
+if [ "$OS" = "linux" ]; then
+    [ "$(id -u)" = "0" ] && ELEVATED=true
+elif [ "$OS" = "windows" ]; then
+    # Thử net session trước (nhanh, không cần PowerShell)
+    if net session > /dev/null 2>&1; then
+        ELEVATED=true
+    else
+        # Fallback: hỏi PowerShell
+        _is_admin=$(powershell -NoProfile -Command \
+            "([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)" \
+            2>/dev/null | tr -d '\r\n')
+        [ "$_is_admin" = "True" ] && ELEVATED=true
+    fi
+fi
+
+# Linux không phải root → hỏi có muốn sudo không
+if [ "$OS" = "linux" ] && [ "$ELEVATED" = "false" ]; then
+    echo ""
+    echo -e "${Y}⚠  Đang chạy không có quyền root.${NC}"
+    echo -e "   Một số thông tin (VM vendor, DMI) cần root để chính xác hơn."
+    echo -ne "   ${BOLD}Chạy lại với sudo không? (y/N): ${NC}"
+    read -r _sudo_ans
+    if [ "$_sudo_ans" = "y" ] || [ "$_sudo_ans" = "Y" ]; then
+        # exec thay thế process hiện tại → sudo tự hỏi password
+        exec sudo bash "$0" "$@"
+    fi
+    echo ""
+fi
+
+# Windows không phải admin → thông báo (không thể auto-relaunch trong Git Bash)
+if [ "$OS" = "windows" ] && [ "$ELEVATED" = "false" ]; then
+    echo ""
+    echo -e "${Y}⚠  Đang chạy không có quyền Administrator.${NC}"
+    echo -e "   Thông tin RAM và VM detection có thể bị thiếu."
+    echo -e "   ${DIM}→ Để chạy đầy đủ: click phải Git Bash → 'Run as Administrator'${NC}"
+    echo ""
+fi
 
 # ── Helpers ───────────────────────────────────────────────
 
@@ -239,26 +281,20 @@ esac
 # ── Hiển thị ─────────────────────────────────────────────
 section "Thông tin phần cứng"
 
-printf "  %-20s %s\n" "OS:"             "$OS_LABEL"
-printf "  %-20s %s\n" "Machine type:"   "$MACHINE_TYPE"
-printf "  %-20s %s\n" "CPU:"            "$CPU_MODEL"
-printf "  %-20s %s cores (logical)\n" "CPU cores:"    "$CPU_CORES"
-printf "  %-20s %s GB\n" "RAM:"          "$RAM_GB"
-printf "  %-20s %s\n" "Disk free:"      "$DISK_FREE"
-printf "  %-20s %s\n" "Virtualization:" "$VIRT"
-printf "  %-20s %s\n" "Battery:"        "$([ "$BATTERY" = "yes" ] && echo "có (laptop)" || echo "không có")"
+PRIV_LABEL="$([ "$ELEVATED" = "true" ] && echo "${G}elevated (admin/root)${NC}" || echo "${Y}normal (không có quyền cao)${NC}")"
 
-# Cảnh báo nếu thiếu quyền
+printf "  %-20s %s\n"    "OS:"             "$OS_LABEL"
+printf "  %-20s "        "Quyền:";  echo -e "$PRIV_LABEL"
+printf "  %-20s %s\n"    "Machine type:"   "$MACHINE_TYPE"
+printf "  %-20s %s\n"    "CPU:"            "$CPU_MODEL"
+printf "  %-20s %s cores (logical)\n" "CPU cores:" "$CPU_CORES"
+printf "  %-20s %s GB\n" "RAM:"            "$RAM_GB"
+printf "  %-20s %s\n"    "Disk free:"      "$DISK_FREE"
+printf "  %-20s %s\n"    "Virtualization:" "$VIRT"
+printf "  %-20s %s\n"    "Battery:"        "$([ "$BATTERY" = "yes" ] && echo "có (laptop)" || echo "không có")"
+
 echo ""
-if [ "$RAM_GB" = "0" ]; then
-    warn "Không lấy được RAM. Thử chạy terminal với quyền Admin (Windows) hoặc sudo (Linux)."
-fi
-if [ "$VIRT" = "none" ] && [ "$OS" = "linux" ]; then
-    note "VM detection đầy đủ hơn nếu chạy: sudo bash detect_hardware.sh"
-fi
-if [ "$OS" = "windows" ]; then
-    note "Nếu thông tin thiếu: click phải Git Bash → 'Run as Administrator' rồi chạy lại."
-fi
+[ "$RAM_GB" = "0" ] && warn "Không lấy được RAM — chạy lại với quyền cao để đọc đầy đủ."
 
 # ── Profile đề xuất ───────────────────────────────────────
 RECOMMENDED=$(recommend_profile "$RAM_GB" "$BATTERY" "$VIRT")
