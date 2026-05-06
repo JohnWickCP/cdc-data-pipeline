@@ -68,14 +68,16 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 
 | # | Feature | Priority | Trạng thái | Ghi chú |
 |---|---|---|---|---|
-| 3.1 | Thêm panel real-time TPS/rate vào Grafana dashboard | High | ❌ | Metrics đã có: `cdc_mysql_insert_rate`, `cdc_mongo_write_rate`, `cdc_lag_total` |
-| 3.2 | Benchmark mode `realistic`: 60% INSERT / 30% UPDATE / 10% DELETE | Medium | ❌ | `benchmark/run_benchmark_v4.py` |
+| 3.1 | Thêm panel real-time TPS/rate vào Grafana dashboard | High | ✅ | Row "Real-time Metrics" trong `cdc_fixed1.json`: timeseries rates + lag + spark batch + executor stats |
+| 3.2 | Benchmark mode `realistic`: 60% INSERT / 30% UPDATE / 10% DELETE | Medium | ✅ | Code đã có trong `run_benchmark_v4.py` (inject_realistic_load, run_e2e_realistic_test) |
 | 3.3 | So sánh đúng Scala vs Python (sau khi fix trigger interval) | Medium | ❌ | Phụ thuộc vào 2A.2 |
 | 3.4 | Test Kafka partition > 1 | Low | ❌ | Benchmark `partition` mode đã có, chưa test thực tế |
-| 3.5 | Spark batch duration thật (via `StreamingQueryListener`) | Low | ❌ | Phức tạp, để sau |
+| 3.5 | Spark batch duration thật (via `StreamingQueryListener`) | Low | ✅ | Hoàn thành trong 2C.1 |
 | 3.6 | Multi-table CDC (ngoài customers/orders) | Low | ❌ | Code đã handle, chỉ cần config thêm |
 | 3.7 | Grafana alert khi lag > ngưỡng | Low | ❌ | |
 | 3.8 | Benchmark trên cloud VM | Low | ❌ | Docs có hướng dẫn tại `docs/VM_SETUP.md` |
+| 3.9 | Live Demo Dashboard (interactive, nhấn nút, xem real-time) | High | ✅ | `demo/demo_server.py` + `demo/index.html`, chạy: `bash demo/run_demo.sh` → `http://localhost:8888` |
+| 3.10 | Lưu và so sánh kết quả benchmark qua nhiều lần chạy | Medium | ✅ | `benchmark/results/history.jsonl` + `benchmark/compare_runs.py` |
 
 ---
 
@@ -102,6 +104,7 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 | docs/CLARIFICATIONS.md | 2026-05-07 | Giải thích TPS vs records/s vs events/s, E2E đo gì, Redis counter bug, spark=0, ram_gb=0 |
 | Phase 2B bug fixes | 2026-05-07 | 2B.1: Redis counter fix (INSERT+DELETE+UPDATE test PASS), 2B.2: Grafana auto-restart, 2B.3: Spark executor metrics |
 | Phase 2C bug fixes | 2026-05-07 | 2C.1: StreamingQueryListener → Redis → exporter. batch_duration_ms thật: ~350–1300ms |
+| Phase 3 — demo + Grafana + benchmark compare | 2026-05-07 | 3.1: Grafana real-time panels; 3.9: demo_server.py + index.html; 3.10: history.jsonl + compare_runs.py |
 
 ---
 
@@ -115,3 +118,4 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 | 2026-05-07 | Thêm docs/CLARIFICATIONS.md. Cập nhật CLAUDE.md: sửa gotchas sai, thêm quy tắc tự update TASKS.md |
 | 2026-05-07 | Hoàn thành Phase 2B (2B.1: Redis counter fix + rebuild JAR, 2B.2: Grafana restart, 2B.3: Spark executor metrics) |
 | 2026-05-07 | Hoàn thành Phase 2C (2C.1: StreamingQueryListener ghi batch duration vào Redis, exporter đọc thật) |
+| 2026-05-07 | Phase 3: demo dashboard (nhấn nút, real-time), Grafana real-time panels, benchmark history + compare |

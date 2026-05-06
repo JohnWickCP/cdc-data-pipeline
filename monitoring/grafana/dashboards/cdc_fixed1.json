@@ -873,6 +873,135 @@
         "mode": "markdown",
         "content": "## So s\u00e1nh v\u1edbi ng\u00e0nh \u2014 CDC Pipeline\n\n| Metric | **Pipeline n\u00e0y** | Debezium docs | Databricks RTM (2026) | Netflix (2025) |\n|---|---|---|---|---|\n| **E2E latency p50** | **2.02s** | ~ms (DB\u2192Kafka only, kh\u00f4ng t\u00ednh Spark) | <200ms (7\u00d7 i3.2xlarge cloud) | seconds (analytics CDC) |\n| **E2E latency p99** | **4.05s** | N/A | <500ms | N/A |\n| **Throughput E2E** | **35 ev/s** | ~7,000 ev/s (connector max, single-threaded) | 100K+ ev/s | 100M ev/s (Data Mesh) |\n| **Redis p99 read** | **<1ms** | N/A | N/A | <100\u03bcs (near-cache) |\n| **Sync rate** | **100%** | at-least-once | exactly-once | exactly-once |\n| **Infra** | **1 laptop \u00b7 Docker** | 2\u00d7 EC2 c5a.xlarge | 7\u00d7 i3.2xlarge | K8s \u00b7 multi-DC \u00b7 10K+ engineers |\n\n### Key Insights\n- **Bottleneck = Spark trigger 2s**, kh\u00f4ng ph\u1ea3i Kafka (experiment: partition 1\u21923 ch\u1ec9 t\u0103ng +0.4%)\n- **Trigger 2s** \u0111\u01b0\u1ee3c x\u00e1c \u0111\u1ecbnh b\u1eb1ng experiment: batch processing ~1200ms \u2192 min safe trigger = 1200 \u00d7 1.5 = 1800ms \u2192 2s\n- **Redis <1ms** \u0111\u1ea1t industry standard \u2014 serving layer kh\u00f4ng ph\u1ea3i bottleneck\n- **Debezium ch\u1ec9 \u0111o DB\u2192Kafka (~ms)** \u2014 pipeline n\u00e0y \u0111o full E2E bao g\u1ed3m Spark batch window\n- Mu\u1ed1n <200ms c\u1ea7n Spark 4.x RTM ho\u1eb7c Flink + cloud cluster"
       }
+    },
+    {
+      "id": 500,
+      "type": "row",
+      "title": "Real-time Metrics — Live Rates & Pipeline Health",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 },
+      "collapsed": false
+    },
+    {
+      "id": 501,
+      "type": "timeseries",
+      "title": "Live Throughput (records/s)",
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 37 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "cdc_mysql_insert_rate",  "refId": "A", "legendFormat": "MySQL insert" },
+        { "expr": "cdc_mongo_write_rate",   "refId": "B", "legendFormat": "MongoDB sync" },
+        { "expr": "cdc_kafka_rate_total",   "refId": "C", "legendFormat": "Kafka events" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "lineInterpolation": "smooth"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "MySQL insert" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "#5794f2", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "MongoDB sync" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "#73bf69", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Kafka events" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "#ff9830", "mode": "fixed" } },
+              { "id": "custom.lineStyle", "value": { "dash": [4, 4], "fill": "dash" } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 502,
+      "type": "stat",
+      "title": "Pipeline Lag (records)",
+      "description": "MySQL count − MongoDB count. 0 = fully synced.",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 37 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [{ "expr": "cdc_lag_total", "refId": "A", "legendFormat": "Lag" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red",    "value": 100 }
+            ]
+          }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 503,
+      "type": "stat",
+      "title": "Spark Batch Duration",
+      "description": "triggerExecution ms. >5000ms = pipeline lag accumulating.",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 37 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [{ "expr": "cdc_spark_batch_duration_ms", "refId": "A", "legendFormat": "Batch ms" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 3000 },
+              { "color": "red",    "value": 5000 }
+            ]
+          }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 504,
+      "type": "stat",
+      "title": "Spark Executor Cores",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 41 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [{ "expr": "cdc_spark_executor_cores", "refId": "A", "legendFormat": "Cores" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [{ "color": "blue", "value": null }] }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 505,
+      "type": "stat",
+      "title": "Spark Executor Memory",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 41 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [{ "expr": "cdc_spark_executor_memory_mb", "refId": "A", "legendFormat": "Memory MB" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decmbytes",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [{ "color": "blue", "value": null }] }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
     }
   ]
 }

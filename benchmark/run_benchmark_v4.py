@@ -739,6 +739,27 @@ def main():
     shutil.copy(result_file, latest_file)
     info(f"Đã copy sang: {latest_file}")
 
+    # ── Ghi history.jsonl (1 dòng / run, dùng compare_runs.py để so sánh) ──
+    history_file = RESULTS_DIR / "history.jsonl"
+    hw_short = f"{hw.get('cpu_model','?')[:30]}, {hw.get('cpu_cores','?')}c, {hw.get('ram_gb','?')}GB"
+    history_entry = {
+        "ts":            report["timestamp"],
+        "run_id":        report["run_id"],
+        "mode":          args.mode,
+        "hw":            hw_short,
+        "max_e2e_tps":   max_e2e_tps,
+        "sus_tps":       sustained_result.get("e2e_tps"),
+        "spark_p50_ms":  sustained_result.get("spark_batch_avg_ms"),
+        "spark_p95_ms":  sustained_result.get("spark_batch_p95_ms"),
+        "kafka_rate":    sustained_result.get("kafka_rate_avg"),
+        "partitions":    current_partitions,
+        "bottleneck":    bottleneck["stage"] if bottleneck else None,
+        "result_file":   str(result_file.name),
+    }
+    with open(history_file, "a", encoding="utf-8") as hf:
+        hf.write(json.dumps(history_entry, ensure_ascii=False) + "\n")
+    info(f"History: {history_file}")
+
     # ── Summary ───────────────────────────────────────────
     step("KẾT QUẢ")
 
