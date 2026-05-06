@@ -496,7 +496,17 @@ for i in $(seq 1 20); do
     sleep 3
 done
 
+# Restart Grafana để force reload provisioning (fix UID mismatch sau stop -v)
+cd "$COMPOSE_DIR"
+docker compose restart grafana 2>&1 | tail -1
 
+# Đợi Grafana khởi động lại
+for i in $(seq 1 20); do
+    curl -sf -u admin:admin http://localhost:3000/api/health > /dev/null 2>&1 && break
+    sleep 3
+done
+log "Grafana provisioning reload OK"
+cd "$PROJECT_DIR"
 
 # ============================================================
 # 10. Báo cáo trạng thái

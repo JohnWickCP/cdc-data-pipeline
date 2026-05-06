@@ -2,6 +2,9 @@ name := "cdc-mysql-to-mongodb-redis"
 version := "1.0"
 scalaVersion := "2.12.18" // Khớp với phiên bản Scala của Spark 3.5.0
 
+// Source file nằm thẳng ở root project (không dùng src/main/scala)
+Compile / unmanagedSourceDirectories += baseDirectory.value
+
 // Khai báo "provided" vì thư viện đã có sẵn trong Docker image của bạn
 libraryDependencies ++= Seq(
   "org.apache.spark" %% "spark-sql" % "3.5.0" % "provided",

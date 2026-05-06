@@ -44,6 +44,8 @@ REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
 
 KAFKA_BROKER = os.environ.get("KAFKA_BROKER", "localhost:9092")
 
+SPARK_MASTER_URL = os.environ.get("SPARK_MASTER_URL", "http://cdc-spark-master:8080")
+
 TOPICS = [
     "inventory.inventory.customers",
     "inventory.inventory.orders"
@@ -196,6 +198,16 @@ spark_batch_duration_ms = Gauge(
     "Spark batch duration ms (placeholder, requires Spark internal metrics)"
 )
 
+spark_executor_cores = Gauge(
+    "cdc_spark_executor_cores",
+    "Spark executor cores currently in use (from Spark Master REST API)"
+)
+
+spark_executor_memory_mb = Gauge(
+    "cdc_spark_executor_memory_mb",
+    "Spark executor memory MB currently in use (from Spark Master REST API)"
+)
+
 
 # =============================
 # Rate tracking state
@@ -310,6 +322,20 @@ def collect_kafka():
     except Exception as e:
         print(f"[Kafka ERROR] {e}")
         return False, 0
+
+
+def collect_spark():
+    try:
+        import urllib.request
+        with urllib.request.urlopen(f"{SPARK_MASTER_URL}/json/", timeout=3) as resp:
+            data = json.loads(resp.read())
+        workers = data.get("workers", [])
+        total_cores = sum(w.get("coresused", 0) for w in workers)
+        total_mem   = sum(w.get("memoryused", 0) for w in workers)
+        spark_executor_cores.set(total_cores)
+        spark_executor_memory_mb.set(total_mem)
+    except Exception as e:
+        print(f"[Spark ERROR] {e}")
 
 
 def collect_benchmark():
@@ -437,6 +463,8 @@ if __name__ == "__main__":
             collect_redis()
 
             kafka_ok, cur_kafka_total = collect_kafka()
+
+            collect_spark()
 
             collect_benchmark()
 

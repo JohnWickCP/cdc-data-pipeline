@@ -96,6 +96,7 @@ object CdcRedisConsumer {
             if (op == "d") {
               customersCol.deleteOne(Filters.eq("_id", id))
               pipe.del(s"customer:$id")
+              pipe.decr("customers:total")
             } else {
               val doc = new Document("_id", id)
                 .append("name", name)
@@ -114,7 +115,7 @@ object CdcRedisConsumer {
               ).asJava
 
               pipe.hset(s"customer:$id", hashData)
-              pipe.incr("customers:total")
+              if (op == "c" || op == "r") pipe.incr("customers:total")
             }
 
           } else if (table == "orders") {
@@ -143,8 +144,8 @@ object CdcRedisConsumer {
                 new ReplaceOptions().upsert(true)
               )
 
-              pipe.incr("orders:total")
-              pipe.incr(s"orders:status:$status")
+              if (op == "c" || op == "r") pipe.incr("orders:total")
+              if (op == "c" || op == "r") pipe.incr(s"orders:status:$status")
               pipe.incrByFloat("orders:revenue", amount)
               pipe.zincrby("top_customers:order_count", 1.0, s"customer:$customerId")
             }
