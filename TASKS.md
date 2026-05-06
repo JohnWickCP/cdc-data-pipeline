@@ -1,0 +1,104 @@
+# TASKS.md — CDC Data Pipeline
+
+Theo dõi công việc: testing, bug fix, cải tiến.
+
+**Workflow:** Test từng chức năng → ghi nhận lỗi → fix theo priority → commit.
+
+---
+
+## Ký hiệu
+
+| Ký hiệu | Ý nghĩa |
+|---|---|
+| ✅ | Hoàn thành |
+| 🔄 | Đang làm |
+| ❌ | Chưa làm |
+| ⚠️ | Có vấn đề, cần xem xét |
+
+---
+
+## Phase 1 — Smoke Test & Kiểm tra chức năng
+
+Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi sửa.
+
+| # | Task | Trạng thái | Ghi chú |
+|---|---|---|---|
+| 1.1 | Pipeline khởi động đầy đủ (12 containers healthy) | ✅ | All up. Fix Python detection stub Windows → dùng `--version` test thay vì `command -v` |
+| 1.2 | INSERT event: MySQL → Kafka → MongoDB | ✅ | Email mask đúng: `phamthid@gmail.com` → `p******d@gmail.com` |
+| 1.3 | INSERT event: MongoDB → Redis (hash + counter) | ✅ | `customer:4` hash OK, `customers:total` tăng đúng |
+| 1.4 | UPDATE event end-to-end | ✅ | MongoDB + Redis cập nhật đúng, email re-mask đúng |
+| 1.5 | DELETE event end-to-end | ⚠️ | MongoDB xóa đúng ✅, Redis key xóa đúng ✅, nhưng `customers:total` không giảm (bug) |
+| 1.6 | Debezium connector active (status = RUNNING) | ✅ | connector + task đều RUNNING |
+| 1.7 | Spark job đang chạy (xuất hiện trên Spark Master UI) | ✅ | 1 app "CDC-MySQL-To-MongoDB-Redis" RUNNING |
+| 1.8 | Prometheus scrape thành công | ✅ | target cdc-pipeline health=up |
+| 1.9 | Grafana dashboard hiển thị data | ✅ | Xác nhận thủ công — hiển thị OK |
+| 1.10 | Metrics exporter trả về metrics | ✅ | 20+ metrics đúng, thấy rõ bug `cdc_redis_customers_total=5` |
+| 1.11 | Benchmark quick mode chạy được | ❌ | `bash run_bench.sh` |
+| 1.12 | Smoke test script pass | ✅ | 43/43 PASS. Fix: Python stub, `|| true` fallback, `aliveworkers` là int không phải list |
+
+---
+
+## Phase 2 — Bug Fix
+
+### 2A — Easy (ít rủi ro, 1-dòng hoặc label change)
+
+| # | Bug | Priority | Trạng thái | File |
+|---|---|---|---|---|
+| 2A.1 | Đổi nhãn "TPS" → "records/s" trong benchmark output | Low | ❌ | `benchmark/run_benchmark_v4.py` |
+| 2A.2 | Đồng trigger interval Python: 10s → 5s (bằng Scala) | Medium | ❌ | `jobs/python/cdc_pipeline.py` |
+| 2A.3 | Fix `ram_gb = 0` trong benchmark JSON | Low | ❌ | `monitoring/exporter/metrics_exporter.py` |
+
+### 2B — Medium (cần test kỹ sau khi fix)
+
+| # | Bug | Priority | Trạng thái | File |
+|---|---|---|---|---|
+| 2B.1 | `customers:total` sai khi UPDATE/DELETE | High | ❌ | L117: incr chạy cả khi UPDATE (phải skip); L96-98: thiếu `decr` khi DELETE. `orders:total` cũng cùng vấn đề — `jobs/scala/cdc_redis_consumer.scala` |
+| 2B.2 | Grafana datasource UID mismatch sau `stop -v` | Medium | ❌ | `start.sh` (auto-patch chưa implement) |
+| 2B.3 | `executor_cores` và `executor_memory_mb` = 0 | Low | ❌ | `monitoring/exporter/metrics_exporter.py` |
+
+### 2C — Hard (cần nghiên cứu thêm)
+
+| # | Bug | Priority | Trạng thái | Ghi chú |
+|---|---|---|---|---|
+| 2C.1 | Spark batch duration luôn = 0ms | Medium | ❌ | Cần Spark REST API hoặc `StreamingQueryListener` |
+
+---
+
+## Phase 3 — Enhancement
+
+| # | Feature | Priority | Trạng thái | Ghi chú |
+|---|---|---|---|---|
+| 3.1 | Thêm panel real-time TPS/rate vào Grafana dashboard | High | ❌ | Metrics đã có: `cdc_mysql_insert_rate`, `cdc_mongo_write_rate`, `cdc_lag_total` |
+| 3.2 | Benchmark mode `realistic`: 60% INSERT / 30% UPDATE / 10% DELETE | Medium | ❌ | `benchmark/run_benchmark_v4.py` |
+| 3.3 | So sánh đúng Scala vs Python (sau khi fix trigger interval) | Medium | ❌ | Phụ thuộc vào 2A.2 |
+| 3.4 | Test Kafka partition > 1 | Low | ❌ | Benchmark `partition` mode đã có, chưa test thực tế |
+| 3.5 | Spark batch duration thật (via `StreamingQueryListener`) | Low | ❌ | Phức tạp, để sau |
+| 3.6 | Multi-table CDC (ngoài customers/orders) | Low | ❌ | Code đã handle, chỉ cần config thêm |
+| 3.7 | Grafana alert khi lag > ngưỡng | Low | ❌ | |
+| 3.8 | Benchmark trên cloud VM | Low | ❌ | Docs có hướng dẫn tại `docs/VM_SETUP.md` |
+
+---
+
+## Đã hoàn thành (tham khảo)
+
+| Item | Ngày | Ghi chú |
+|---|---|---|
+| CDC E2E MySQL → Kafka → Spark → MongoDB | 2026-04-19 | Core pipeline |
+| CDC E2E → Redis | 2026-04-19 | Hash + counter + sorted set |
+| Idempotent upsert (replaceOne + upsert) | 2026-04-19 | |
+| Spark checkpoint | 2026-04-19 | |
+| Auto-fix Kafka Cluster ID conflict | 2026-05-06 | `start.sh` |
+| Rate metrics trong exporter | 2026-05-06 | insert_rate, kafka_rate, mongo_rate, lag |
+| Hardware profiles (.env.laptop / .env.server / .env.vm) | 2026-05-06 | |
+| Pin versions trong requirements.txt | 2026-05-06 | |
+| Tạo .env.example | 2026-05-06 | |
+| Windows Git Bash compatibility | 2026-05-06 | python3 fallback, awk fix |
+| Demo script + screenshots | 2026-05-06 | |
+
+---
+
+## Lịch sử
+
+| Ngày | Thay đổi |
+|---|---|
+| 2026-05-06 | Tạo file TASKS.md, tổng hợp từ KNOWN_ISSUES.md |

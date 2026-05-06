@@ -8,15 +8,46 @@
 
 set -e
 
+# Ngăn Git Bash trên Windows tự động đổi đường dẫn Unix (/opt/...) thành đường dẫn C:/
+export MSYS_NO_PATHCONV=1
+
+# Tìm Python interpreter — dùng --version để test thật, tránh Windows Store stub
+# (python3 trên Windows có thể là stub redirect tới Microsoft Store, không chạy được)
+if python3 --version >/dev/null 2>&1; then
+    PYTHON=python3
+elif python --version >/dev/null 2>&1; then
+    PYTHON=python
+else
+    PYTHON=python3
+fi
+
 # ── Parse flags ──────────────────────────────────────
 USE_PYTHON=false
+HW_PROFILE=""
 for arg in "$@"; do
     case "$arg" in
         --python)     USE_PYTHON=true ;;
+        --profile=*)
+            HW_PROFILE="${arg#--profile=}"
+            PROFILE_FILE="$(cd "$(dirname "$0")" && pwd)/pipeline/.env.$HW_PROFILE"
+            if [ ! -f "$PROFILE_FILE" ]; then
+                echo "Lỗi: Không tìm thấy profile '$PROFILE_FILE'"
+                echo "Profile có sẵn: laptop, server, vm"
+                exit 1
+            fi
+            echo "📂 Áp dụng profile phần cứng: $HW_PROFILE"
+            cp "$PROFILE_FILE" "$(cd "$(dirname "$0")" && pwd)/pipeline/.env"
+            ;;
         --help|-h)
-            echo "Usage: bash start.sh [--python]"
-            echo "  (no flag)  Dùng Scala JAR (mặc định, nhanh hơn)"
-            echo "  --python   Dùng file Python (jobs/python/cdc_pipeline.py)"
+            echo "Usage: bash start.sh [--python] [--profile=NAME]"
+            echo "  (no flag)          Dùng Scala JAR (mặc định, nhanh hơn)"
+            echo "  --python           Dùng file Python (jobs/python/cdc_pipeline.py)"
+            echo "  --profile=NAME     Load cấu hình tài nguyên: laptop | server | vm"
+            echo ""
+            echo "Ví dụ:"
+            echo "  bash start.sh                      # chạy với cấu hình hiện tại"
+            echo "  bash start.sh --profile=server     # switch sang server rồi chạy"
+            echo "  bash start.sh --python --profile=laptop"
             exit 0 ;;
     esac
 done
@@ -49,7 +80,7 @@ echo ""
 # ============================================================
 
 info "Dọn dẹp processes cũ..."
-pkill -f "metrics_exporter.py" 2>/dev/null && log "Đã dừng metrics exporter cũ" || true
+
 pkill -f "spark-submit.*cdc_pipeline" 2>/dev/null || true
 sleep 1
 
@@ -179,7 +210,7 @@ EXISTING=$(curl -sf http://localhost:8083/connectors 2>/dev/null || echo "[]")
 
 if echo "$EXISTING" | grep -q "mysql-inventory-connector"; then
     CONN_STATE=$(curl -sf http://localhost:8083/connectors/mysql-inventory-connector/status 2>/dev/null | \
-        python3 -c "import sys,json; print(json.load(sys.stdin)['connector']['state'])" 2>/dev/null || echo "UNKNOWN")
+        $PYTHON -c "import sys,json; print(json.load(sys.stdin)['connector']['state'])" 2>/dev/null || echo "UNKNOWN")
     if [ "$CONN_STATE" = "RUNNING" ]; then
         log "Connector đang RUNNING — bỏ qua"
     else
@@ -188,13 +219,13 @@ if echo "$EXISTING" | grep -q "mysql-inventory-connector"; then
         sleep 3
         curl -sf -X POST http://localhost:8083/connectors \
             -H "Content-Type: application/json" \
-            -d @"$PROJECT_DIR/demo/connector.json" > /dev/null 2>&1
+            -d @"../demo/connector.json" > /dev/null 2>&1 || true
         log "Connector đã tạo lại"
     fi
 else
     curl -sf -X POST http://localhost:8083/connectors \
         -H "Content-Type: application/json" \
-        -d @"$PROJECT_DIR/demo/connector.json" > /dev/null 2>&1
+        -d @"../demo/connector.json" > /dev/null 2>&1 || true
     log "Connector đã đăng ký mới"
 fi
 
@@ -230,7 +261,7 @@ docker exec cdc-spark-master bash -c '
 ' 2>/dev/null || true
 
 ACTIVE_APPS=$(curl -sf http://localhost:8080/json/ 2>/dev/null | \
-    python3 -c "import sys,json; print(len(json.load(sys.stdin).get('activeapps',[])))" 2>/dev/null || echo "0")
+    $PYTHON -c "import sys,json; print(len(json.load(sys.stdin).get('activeapps',[])))" 2>/dev/null || echo "0")
 
 if [ "$ACTIVE_APPS" -gt 0 ]; then
     warn "Còn $ACTIVE_APPS app(s) chiếm resource — restart Spark cluster..."
@@ -283,7 +314,7 @@ for i in $(seq 1 60); do
     fi
     if [ $((i % 10)) -eq 0 ]; then
         APPS=$(curl -sf http://localhost:8080/json/ 2>/dev/null | \
-            python3 -c "import sys,json; print(len(json.load(sys.stdin).get('activeapps',[])))" 2>/dev/null || echo "0")
+            $PYTHON -c "import sys,json; print(len(json.load(sys.stdin).get('activeapps',[])))" 2>/dev/null || echo "0")
         [ "$APPS" -eq 0 ] && warn "Spark app có thể đã crash"
     fi
     sleep 3
@@ -291,22 +322,18 @@ done
 [ "$SPARK_OK" = false ] && warn "Spark chưa xong — có thể cần thêm thời gian"
 
 # ============================================================
-# 8. Khởi động Metrics Exporter
+# 8. Kiểm tra Metrics Exporter (Đã Dockerize)
 # ============================================================
 
-info "Khởi động metrics exporter..."
+info "Kiểm tra metrics exporter..."
 cd "$PROJECT_DIR"
 
+wait_for_container "cdc-metrics-exporter" 30
+
 if curl -sf http://localhost:8000/metrics > /dev/null 2>&1; then
-    log "Metrics exporter đã chạy sẵn"
+    log "Metrics exporter đang chạy thành công (trên Docker)"
 else
-    nohup python3 metrics_exporter.py > metrics_exporter.log 2>&1 &
-    sleep 5
-    if curl -sf http://localhost:8000/metrics > /dev/null 2>&1; then
-        log "Metrics exporter đang chạy"
-    else
-        warn "Metrics exporter lỗi — chạy: pip3 install prometheus-client pymysql pymongo redis kafka-python"
-    fi
+    warn "Metrics exporter chưa phản hồi ở localhost:8000"
 fi
 
 # ============================================================
@@ -321,65 +348,7 @@ for i in $(seq 1 20); do
     sleep 3
 done
 
-# Lấy UID thực tế của Prometheus datasource
-ACTUAL_UID=$(curl -sf -u admin:admin http://localhost:3000/api/datasources 2>/dev/null | \
-    python3 -c "
-import sys, json
-ds = json.load(sys.stdin)
-for d in ds:
-    if d['type'] == 'prometheus':
-        print(d['uid'])
-        break
-" 2>/dev/null || echo "")
 
-if [ -n "$ACTUAL_UID" ] && [ -f "$DASHBOARD_JSON" ]; then
-    # Tìm UID cũ trong dashboard JSON (bất kỳ UID nào đang có)
-    OLD_UID=$(python3 -c "
-import json
-data = json.loads(open('$DASHBOARD_JSON').read())
-for p in data.get('panels', []):
-    ds = p.get('datasource', {})
-    if isinstance(ds, dict) and ds.get('uid'):
-        print(ds['uid'])
-        break
-    for t in p.get('targets', []):
-        tds = t.get('datasource', {})
-        if isinstance(tds, dict) and tds.get('uid'):
-            print(tds['uid'])
-            break
-" 2>/dev/null | head -1)
-
-    if [ -n "$OLD_UID" ] && [ "$OLD_UID" != "$ACTUAL_UID" ]; then
-        info "Dashboard UID cũ: $OLD_UID → mới: $ACTUAL_UID"
-        sed -i "s/$OLD_UID/$ACTUAL_UID/g" "$DASHBOARD_JSON"
-        log "Đã cập nhật dashboard JSON"
-
-        # Restart Grafana để reload dashboard
-        cd "$COMPOSE_DIR"
-        docker compose restart grafana 2>&1 | tail -1
-        sleep 10
-        log "Grafana đã restart với UID mới"
-    elif [ "$OLD_UID" = "$ACTUAL_UID" ]; then
-        log "Dashboard UID đã đúng — không cần sửa"
-    else
-        warn "Không tìm được UID cũ trong dashboard"
-    fi
-
-    # ── LUÔN restart Grafana để force reload dashboard ──
-    info "Restart Grafana để reload dashboard..."
-    cd "$COMPOSE_DIR"
-    docker compose restart grafana 2>&1 | tail -1
-    sleep 10
-    log "Grafana đã reload"
-    cd "$PROJECT_DIR"
-else
-    if [ -z "$ACTUAL_UID" ]; then
-        warn "Không lấy được Prometheus datasource UID từ Grafana"
-    fi
-    if [ ! -f "$DASHBOARD_JSON" ]; then
-        warn "Không tìm thấy dashboard JSON: $DASHBOARD_JSON"
-    fi
-fi
 
 # ============================================================
 # 10. Báo cáo trạng thái
@@ -396,29 +365,29 @@ MO=$(docker exec cdc-mysql mysql -uroot -proot -N -e "SELECT COUNT(*) FROM inven
 printf "  %-18s customers=%-4s orders=%-4s\n" "MySQL:" "$MC" "$MO"
 
 DS=$(curl -sf http://localhost:8083/connectors/mysql-inventory-connector/status 2>/dev/null | \
-    python3 -c "import sys,json; print(json.load(sys.stdin)['connector']['state'])" 2>/dev/null || echo "?")
+    $PYTHON -c "import sys,json; print(json.load(sys.stdin)['connector']['state'])" 2>/dev/null || echo "?")
 printf "  %-18s %s\n" "Debezium:" "$DS"
 
 KT=$(docker exec cdc-kafka kafka-topics --list --bootstrap-server localhost:9092 2>/dev/null | grep -c "inventory.inventory" || echo "?")
 printf "  %-18s %s CDC topics\n" "Kafka:" "$KT"
 
 SA=$(curl -sf http://localhost:8080/json/ 2>/dev/null | \
-    python3 -c "import sys,json; print(len(json.load(sys.stdin).get('activeapps',[])))" 2>/dev/null || echo "?")
+    $PYTHON -c "import sys,json; print(len(json.load(sys.stdin).get('activeapps',[])))" 2>/dev/null || echo "?")
 printf "  %-18s %s active app(s)\n" "Spark:" "$SA"
 
 GC=$(docker exec cdc-mongodb mongosh --quiet --eval "db.getSiblingDB('inventory').customers.countDocuments()" 2>/dev/null || echo "?")
 GO=$(docker exec cdc-mongodb mongosh --quiet --eval "db.getSiblingDB('inventory').orders.countDocuments()" 2>/dev/null || echo "?")
 printf "  %-18s customers=%-4s orders=%-4s\n" "MongoDB:" "$GC" "$GO"
 
-RK=$(docker exec cdc-redis redis-cli dbsize 2>/dev/null | awk '{print $2}' || echo "?")
+RK=$(docker exec cdc-redis redis-cli dbsize 2>/dev/null | awk '{print $1}' || echo "?")
 printf "  %-18s %s keys\n" "Redis:" "$RK"
 
 PH=$(curl -sf http://localhost:9090/api/v1/targets 2>/dev/null | \
-    python3 -c "import sys,json; t=json.load(sys.stdin)['data']['activeTargets']; print(t[0]['health'] if t else '?')" 2>/dev/null || echo "?")
+    $PYTHON -c "import sys,json; t=json.load(sys.stdin)['data']['activeTargets']; print(t[0]['health'] if t else '?')" 2>/dev/null || echo "?")
 printf "  %-18s target %s\n" "Prometheus:" "$PH"
 
 GH=$(curl -sf http://localhost:3000/api/health 2>/dev/null | \
-    python3 -c "import sys,json; print(json.load(sys.stdin).get('database','?'))" 2>/dev/null || echo "?")
+    $PYTHON -c "import sys,json; print(json.load(sys.stdin).get('database','?'))" 2>/dev/null || echo "?")
 printf "  %-18s %s\n" "Grafana:" "$GH"
 
 echo ""

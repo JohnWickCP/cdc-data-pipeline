@@ -1,3 +1,4 @@
+CLAUDE.md
 *.log
 *.bak
 *.backup
@@ -16,7 +17,14 @@ __pycache__/
 *.egg-info/
 venv/
 env/
-.env
+# Active .env (có thể chứa thông tin nhạy cảm khi deploy thật)
+# Pipeline profiles (.env.laptop, .env.server, .env.vm) vẫn được commit
+pipeline/.env
+monitoring/exporter/.env
+!pipeline/.env.laptop
+!pipeline/.env.server
+!pipeline/.env.vm
+!monitoring/exporter/.env.example
 jobs/scala/target/
 jobs/scala/project/target/
 jobs/scala/project/project/
