@@ -44,9 +44,9 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 
 | # | Bug | Priority | Trạng thái | File |
 |---|---|---|---|---|
-| 2A.1 | Đổi nhãn "TPS" → "records/s" trong benchmark output | Low | ❌ | `benchmark/run_benchmark_v4.py` |
-| 2A.2 | Đồng trigger interval Python: 10s → 5s (bằng Scala) | Medium | ❌ | `jobs/python/cdc_pipeline.py` |
-| 2A.3 | Fix `ram_gb = 0` trong benchmark JSON | Low | ❌ | `monitoring/exporter/metrics_exporter.py` |
+| 2A.1 | Đổi nhãn "TPS" → "records/s" trong benchmark output | Low | ✅ | `benchmark/run_benchmark_v4.py` |
+| 2A.2 | Đồng trigger interval Python: 10s → 5s (bằng Scala) | Medium | ✅ | Code đã là 5s (line 248), không cần fix |
+| 2A.3 | Fix `ram_gb = 0` trong benchmark JSON | Low | ✅ | `benchmark/run_benchmark_v4.py` — đổi `free -g` → `free -m /1024` |
 
 ### 2B — Medium (cần test kỹ sau khi fix)
 
@@ -107,3 +107,4 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 |---|---|
 | 2026-05-06 | Tạo file TASKS.md, tổng hợp từ KNOWN_ISSUES.md |
 | 2026-05-07 | Hoàn thành Phase 1 (1.11 benchmark). Thêm detect_hardware.sh + start.sh enhancements |
+| 2026-05-07 | Hoàn thành Phase 2A (2A.1: TPS→records/s, 2A.2: already fixed, 2A.3: ram_gb free -m fix) |

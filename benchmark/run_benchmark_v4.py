@@ -3,15 +3,15 @@
 run_benchmark.py — CDC Pipeline Benchmark Runner v4
 
 Cải tiến so với v3:
-- E2E TPS thật: đo từ lúc inject đến lúc MongoDB sync xong (không trick drain)
-- Thêm mức 2000 TPS
+- E2E records/s thật: đo từ lúc inject đến lúc MongoDB sync xong (không trick drain)
+- Thêm mức 2000 records/s
 - Mode partition: tự đổi Kafka partition rồi test lại
 - Output JSON chi tiết
 
 Usage:
     python3 benchmark/run_benchmark.py              # full mode (default)
     python3 benchmark/run_benchmark.py quick         # 3 phút
-    python3 benchmark/run_benchmark.py stress        # tìm max TPS
+    python3 benchmark/run_benchmark.py stress        # tìm max records/s
     python3 benchmark/run_benchmark.py partition      # test với 3 partitions
 
 Require: pymysql, pymongo, requests, redis, kafka-python
@@ -419,7 +419,7 @@ def get_hardware():
     return {
         "cpu_model": run("lscpu | grep 'Model name' | sed 's/.*:\\s*//'"),
         "cpu_cores": int(run("nproc") or "0"),
-        "ram_gb": int(run("free -g | awk '/^Mem:/{print $2}'") or "0"),
+        "ram_gb": round(int(run("free -m | awk '/^Mem:/{print $2}'") or "0") / 1024, 1),
         "disk_free": run(f"df -h {PROJECT_DIR} | tail -1 | awk '{{print $4}}'"),
     }
 
@@ -609,7 +609,7 @@ def main():
     info(f"Spark cores: {spark_info['executor_cores']}, Memory: {spark_info['executor_memory_mb']}MB")
 
     # Warmup
-    step("Khởi động nóng (10s, 5 TPS)")
+    step("Khởi động nóng (10s, 5 records/s)")
     cleanup()
     inject_load(5, 10)
     time.sleep(10)
@@ -617,7 +617,7 @@ def main():
     ok("Xong")
 
     # ── Ramp-up test ─────────────────────────────────────
-    step("Đo E2E TPS thật — tăng dần tải")
+    step("Đo E2E records/s thật — tăng dần tải")
 
     ramp_results = []
     max_e2e_tps = 0
@@ -684,7 +684,7 @@ def main():
 
     # ── Sustained test ────────────────────────────────────
     sustained_target = max(50, int(max_e2e_tps * 0.8))
-    step(f"Chạy ổn định {sustained_target} TPS × {cfg['sustained_duration']}s")
+    step(f"Chạy ổn định {sustained_target} records/s × {cfg['sustained_duration']}s")
 
     cleanup()
     time.sleep(3)
@@ -745,14 +745,14 @@ def main():
     print(f"\n  🎯 Max E2E records/s:   {C.BOLD}{max_e2e_tps}{C.X}")
 
     if bottleneck:
-        print(f"  🚧 Bottleneck tại:      {bottleneck['at_tps']} TPS (inject)")
+        print(f"  🚧 Bottleneck tại:      {bottleneck['at_tps']} records/s (inject)")
         print(f"  🎯 E2E thật khi nghẽn:  {bottleneck['e2e_tps']} records/s")
         print(f"  📍 Tầng nghẽn:          {bottleneck['stage']}")
     else:
         print(f"  ✅ Không bottleneck: pipeline kịp xử lý tất cả mức test")
 
     sr = report['sustained']
-    print(f"\n  📊 Chạy ổn định ({sustained_target} TPS × {cfg['sustained_duration']}s):")
+    print(f"\n  📊 Chạy ổn định ({sustained_target} records/s × {cfg['sustained_duration']}s):")
     print(f"      E2E records/s:    {sr['e2e_tps']}")
     print(f"      Records đến Mongo: {sr['mongo_delta']}")
     print(f"      Lag còn lại:      {sr['lag_remaining']}")
