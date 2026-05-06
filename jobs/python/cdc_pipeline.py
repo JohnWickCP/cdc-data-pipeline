@@ -245,7 +245,7 @@ def process_batch(batch_df, batch_id):
 
 query = records.writeStream \
     .foreachBatch(process_batch) \
-    .trigger(processingTime="10 seconds") \
+    .trigger(processingTime="5 seconds") \
     .option("checkpointLocation", "/tmp/spark-checkpoint/cdc-pipeline") \
     .start()
 

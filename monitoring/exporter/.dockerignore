@@ -1,0 +1,25 @@
+# Môi trường ảo Python
+venv/
+env/
+.venv/
+
+# Cấu hình Git
+.git/
+.gitignore
+
+# Các thư mục không cần thiết cho metrics_exporter
+spark/
+pipeline/
+monitoring/
+demo/
+docs/
+screenshots/
+jobs/
+
+# Script
+*.sh
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*$py.class

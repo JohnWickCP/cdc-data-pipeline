@@ -10,20 +10,14 @@
 docker ps --format "table {{.Names}}\t{{.Status}}"
 
 # 2. Đảm bảo connector đang RUNNING
-curl -s http://localhost:8083/connectors/mysql-connector/status | python3 -m json.tool
+curl -s http://localhost:8083/connectors/mysql-inventory-connector/status
 
-# 3. Reset data về trạng thái sạch
-docker exec -i cdc-mysql mysql -uroot -proot < demo/demo-data.sql
+# 3. Kiểm tra Spark job đang chạy (phải có 1 active app)
+curl -s http://localhost:8080/json/ | python3 -c "import sys,json; apps=json.load(sys.stdin)['activeapps']; print(f'{len(apps)} active app(s)')"
 
-# 4. Mở sẵn Spark (terminal riêng — để chạy ngay khi cần)
-docker exec -it cdc-spark-master /opt/spark/bin/spark-shell \
-  --master local[2] \
-  -i /opt/spark/work-dir/cdc_redis_consumer.scala
-
-# 5. Mở sẵn 3 terminal:
-#    Terminal A — chạy lệnh MySQL
-#    Terminal B — Spark đang chạy (bước 4)
-#    Terminal C — verify Redis/MongoDB
+# 4. Kiểm tra MongoDB đã có data
+docker exec cdc-mongodb mongosh --quiet \
+  --eval "db.getSiblingDB('inventory').customers.countDocuments()"
 ```
 
 ---
@@ -68,14 +62,8 @@ INSERT INTO customers (name, email) VALUES ('Pham Duc Duy', 'duy.pham@company.co
 ```bash
 docker exec cdc-kafka kafka-console-consumer \
   --bootstrap-server localhost:9092 \
-  --topic mysql.inventory.customers \
-  --max-messages 1 2>/dev/null | python3 -c "
-import sys, json
-data = json.loads(sys.stdin.read())
-p = data['payload']
-print('op   :', p['op'])
-print('after:', p['after'])
-"
+  --topic inventory.inventory.customers \
+  --max-messages 1 2>/dev/null
 ```
 
 **Nói:** *"op = 'c' — create. Debezium đã capture sự kiện INSERT và đẩy vào Kafka topic ngay lập tức. Đây là nền tảng của CDC."*
@@ -177,9 +165,10 @@ INSERT INTO customers (name, email) VALUES ('Nguyen Offline', 'offline@company.c
 
 **Chạy — Terminal B:**
 ```bash
-docker exec -it cdc-spark-master /opt/spark/bin/spark-shell \
-  --master local[2] \
-  -i /opt/spark/work-dir/cdc_redis_consumer.scala
+# Spark job đã chạy sẵn dưới dạng background process.
+# Xem log Spark bằng:
+docker logs cdc-spark-master --tail 30 -f
+# (Ctrl+C để thoát xem log, Spark vẫn tiếp tục chạy)
 ```
 
 **Chờ ~10 giây** → Spark sẽ xử lý đúng record bị bỏ lỡ.

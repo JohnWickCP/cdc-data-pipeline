@@ -41,6 +41,9 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # ── Tài nguyên theo phần cứng (cấu hình trong pipeline/.env) ──
+      KAFKA_HEAP_OPTS: "${KAFKA_HEAP_OPTS:--Xmx1g -Xms512m}"
+      KAFKA_NUM_PARTITIONS: "${KAFKA_NUM_PARTITIONS:-1}"
     volumes:
       - kafka_data:/var/lib/kafka/data
     healthcheck:
@@ -61,6 +64,8 @@ services:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: inventory
       MYSQL_ROOT_HOST: "%"
+      # ── Tài nguyên theo phần cứng ──
+      MYSQL_INNODB_BUFFER_POOL_SIZE: "${MYSQL_INNODB_BUFFER_POOL_SIZE:-512M}"
     command:
       - --server-id=1
       - --log-bin=mysql-bin
@@ -68,6 +73,7 @@ services:
       - --binlog-row-image=FULL
       - --gtid-mode=ON
       - --enforce-gtid-consistency=ON
+      - --innodb-buffer-pool-size=${MYSQL_INNODB_BUFFER_POOL_SIZE:-536870912}
     volumes:
       - mysql_data:/var/lib/mysql
       - ../demo/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
@@ -85,6 +91,8 @@ services:
       - cdc-net
     ports:
       - "27017:27017"
+    # ── WiredTiger cache theo phần cứng ──
+    command: ["mongod", "--wiredTigerCacheSizeGB", "${MONGO_CACHE_SIZE_GB:-1}"]
     volumes:
       - mongodb_data:/data/db
     healthcheck:
@@ -131,6 +139,8 @@ services:
       KEY_CONVERTER_SCHEMAS_ENABLE: "false"
       VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
       OFFSET_FLUSH_INTERVAL_MS: 5000
+      # ── Tài nguyên theo phần cứng ──
+      KAFKA_HEAP_OPTS: "${CONNECT_HEAP:--Xmx512m -Xms256m}"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8083/connectors"]
       interval: 15s
@@ -184,6 +194,10 @@ services:
       - "8081:8081"
     volumes:
       - ../jobs:/opt/spark/jobs
+    # ── Tài nguyên theo phần cứng (cấu hình trong pipeline/.env) ──
+    environment:
+      SPARK_WORKER_CORES: "${SPARK_WORKER_CORES:-4}"
+      SPARK_WORKER_MEMORY: "${SPARK_WORKER_MEMORY:-2g}"
 
   spark-worker-2:
     image: cdc-spark:3.5.0
@@ -202,6 +216,9 @@ services:
       - "8082:8081"
     volumes:
       - ../jobs:/opt/spark/jobs
+    environment:
+      SPARK_WORKER_CORES: "${SPARK_WORKER_CORES:-4}"
+      SPARK_WORKER_MEMORY: "${SPARK_WORKER_MEMORY:-2g}"
 
 
   spark-worker-3:
@@ -221,6 +238,29 @@ services:
       - "8085:8081"
     volumes:
       - ../jobs:/opt/spark/jobs
+    environment:
+      SPARK_WORKER_CORES: "${SPARK_WORKER_CORES:-4}"
+      SPARK_WORKER_MEMORY: "${SPARK_WORKER_MEMORY:-2g}"
+  metrics-exporter:
+    build:
+      context: ../monitoring/exporter
+      dockerfile: Dockerfile
+    container_name: cdc-metrics-exporter
+    env_file: ../monitoring/exporter/.env
+    environment:
+      - BENCHMARK_DIR=/app/benchmark
+    volumes:
+      - ../benchmark:/app/benchmark
+    networks:
+      - cdc-net
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mysql
+      - mongodb
+      - redis
+      - kafka
+
   prometheus:
     image: prom/prometheus:latest
     container_name: cdc-prometheus

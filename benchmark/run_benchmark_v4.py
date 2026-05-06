@@ -44,11 +44,18 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent if SCRIPT_DIR.name == "benchmark" else SCRIPT_DIR
 RESULTS_DIR = PROJECT_DIR / "benchmark" / "results"
 
-MYSQL_CONFIG = dict(host="127.0.0.1", port=3306, user="root", password="root",
-                    database="inventory", autocommit=True, connect_timeout=5)
-MONGO_URI = "mongodb://127.0.0.1:27017"
-METRICS_URL = "http://localhost:8000/metrics"
-SPARK_MASTER_URL = "http://localhost:8080/json/"
+MYSQL_CONFIG = dict(
+    host=os.environ.get("MYSQL_HOST", "127.0.0.1"),
+    port=int(os.environ.get("MYSQL_PORT", 3306)),
+    user=os.environ.get("MYSQL_USER", "root"),
+    password=os.environ.get("MYSQL_PASSWORD", "root"),
+    database=os.environ.get("MYSQL_DB", "inventory"),
+    autocommit=True,
+    connect_timeout=5
+)
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb://127.0.0.1:27017")
+METRICS_URL = os.environ.get("METRICS_URL", "http://localhost:8000/metrics")
+SPARK_MASTER_URL = os.environ.get("SPARK_MASTER_URL", "http://cdc-spark-master:8080/json/")
 
 START_ID = 1_000_000
 
@@ -141,6 +148,81 @@ def inject_load(target_tps, duration_s, batch_size=10):
     elapsed = time.time() - start
     conn.close()
     return inserted, elapsed
+
+
+def inject_realistic_load(target_tps, duration_s, batch_size=10):
+    """
+    Inject workload realistic: 60% INSERT / 30% UPDATE / 10% DELETE.
+    Phản ánh traffic production thực tế hơn thuần INSERT.
+    Returns: (total_events, elapsed_s, breakdown_dict)
+    """
+    conn = pymysql.connect(**MYSQL_CONFIG)
+    cur = conn.cursor()
+
+    total_batches = max(1, (target_tps * duration_s) // batch_size)
+    interval = 1.0 / (target_tps / batch_size)
+
+    ins_per_batch = max(1, int(batch_size * 0.6))
+    upd_per_batch = max(1, int(batch_size * 0.3))
+    del_per_batch = batch_size - ins_per_batch - upd_per_batch
+
+    # Lấy ID seed để UPDATE (dùng data gốc, không xóa)
+    cur.execute("SELECT id FROM customers WHERE id < 1000000 LIMIT 100")
+    seed_ids = [row[0] for row in cur.fetchall()] or [1, 2, 3]
+
+    total_ins = total_upd = total_del = 0
+    start = time.time()
+
+    for i in range(total_batches):
+        tick = time.time()
+
+        # INSERT mới
+        vals = ",".join([
+            f"({START_ID + total_ins + j}, 'Mix{total_ins+j}', 'm{total_ins+j}@t.com', '09{(total_ins+j)%1000000:06d}')"
+            for j in range(ins_per_batch)
+        ])
+        try:
+            cur.execute(
+                f"INSERT INTO customers (id, name, email, phone) VALUES {vals} "
+                f"ON DUPLICATE KEY UPDATE name=VALUES(name)"
+            )
+            total_ins += ins_per_batch
+        except Exception:
+            pass
+
+        # UPDATE seed records (cycling)
+        for j in range(upd_per_batch):
+            uid = seed_ids[(i * upd_per_batch + j) % len(seed_ids)]
+            try:
+                cur.execute(f"UPDATE customers SET phone='09{(total_upd)%1000000:06d}' WHERE id={uid}")
+                total_upd += 1
+            except Exception:
+                pass
+
+        # DELETE vài record vừa INSERT
+        if del_per_batch > 0 and total_ins > del_per_batch * 10:
+            del_id = START_ID + total_del * 7
+            try:
+                cur.execute(f"DELETE FROM customers WHERE id={del_id} AND id >= {START_ID}")
+                total_del += 1
+            except Exception:
+                pass
+
+        sleep_t = interval - (time.time() - tick)
+        if sleep_t > 0:
+            time.sleep(sleep_t)
+
+    elapsed = time.time() - start
+    conn.close()
+    return total_ins + total_upd + total_del, elapsed, {
+        'insert': total_ins, 'update': total_upd, 'delete': total_del
+    }
+
+
+def get_kafka_offset():
+    """Lấy tổng Kafka offset từ metrics exporter."""
+    m = get_all_metrics()
+    return m.get('cdc_kafka_customers_offset', 0) + m.get('cdc_kafka_orders_offset', 0)
 
 
 # ══════════════════════════════════════════════════════════
@@ -238,6 +320,75 @@ def run_e2e_test(target_tps, duration_s=30, max_drain_s=120):
 
     conn.close()
     return result
+
+
+def run_e2e_realistic_test(target_tps, duration_s=30, max_drain_s=120):
+    """
+    Đo E2E cho workload realistic (INSERT/UPDATE/DELETE mix).
+    Dùng Kafka offset delta thay vì MongoDB count (DELETE làm giảm count).
+    E2E events/s = kafka_delta / TỔNG thời gian.
+    """
+    before_kafka = get_kafka_offset()
+
+    samples = []
+    stop_sampling = threading.Event()
+
+    def sampler():
+        while not stop_sampling.is_set():
+            samples.append(sample_metrics())
+            time.sleep(2)
+
+    sampler_thread = threading.Thread(target=sampler, daemon=True)
+    sampler_thread.start()
+
+    t_start = time.time()
+    total_events, inject_elapsed, breakdown = inject_realistic_load(target_tps, duration_s)
+    inject_rate = total_events / inject_elapsed if inject_elapsed > 0 else 0
+
+    # Chờ Kafka offset ổn định (không tăng nữa = drain xong)
+    drain_start = time.time()
+    prev_offset = get_kafka_offset()
+    settled = False
+    while time.time() - t_start < duration_s + max_drain_s:
+        time.sleep(2)
+        cur_offset = get_kafka_offset()
+        if cur_offset == prev_offset:
+            settled = True
+            break
+        prev_offset = cur_offset
+
+    t_end = time.time()
+    total_elapsed = t_end - t_start
+    drain_elapsed = t_end - drain_start
+
+    stop_sampling.set()
+    sampler_thread.join(timeout=3)
+
+    after_kafka = get_kafka_offset()
+    kafka_delta = after_kafka - before_kafka
+    e2e_rate = kafka_delta / total_elapsed if total_elapsed > 0 else 0
+
+    spark_values = sorted([s['spark_ms'] for s in samples if s['spark_ms'] > 0])
+    kafka_rates = [s['kafka_rate'] for s in samples if s['kafka_rate'] > 0]
+
+    return {
+        "target_tps":         target_tps,
+        "duration_s":         duration_s,
+        "total_events":       total_events,
+        "breakdown":          breakdown,
+        "kafka_delta":        int(kafka_delta),
+        "inject_elapsed_s":   round(inject_elapsed, 1),
+        "drain_elapsed_s":    round(drain_elapsed, 1),
+        "total_elapsed_s":    round(total_elapsed, 1),
+        "inject_rate":        round(inject_rate, 1),
+        "e2e_tps":            round(e2e_rate, 1),
+        "lag_remaining":      0,
+        "synced":             settled,
+        "spark_batch_avg_ms": round(statistics.mean(spark_values), 1) if spark_values else 0,
+        "spark_batch_p95_ms": round(spark_values[int(len(spark_values) * 0.95)], 1) if spark_values else 0,
+        "kafka_rate_avg":     round(statistics.mean(kafka_rates), 1) if kafka_rates else 0,
+        "samples_count":      len(samples),
+    }
 
 
 # ══════════════════════════════════════════════════════════
@@ -390,6 +541,12 @@ MODES = {
         'partitions': 3,
         'description': 'test với 3 partitions',
     },
+    'realistic': {
+        'levels': [100, 200, 500],
+        'duration': 30,
+        'sustained_duration': 60,
+        'description': 'mix INSERT(60%)/UPDATE(30%)/DELETE(10%) — phản ánh traffic production thực tế',
+    },
 }
 
 
@@ -398,8 +555,9 @@ MODES = {
 # ══════════════════════════════════════════════════════════
 def main():
     parser = argparse.ArgumentParser(description="CDC Benchmark v4 — E2E TPS thật")
-    parser.add_argument('mode', nargs='?', default='full', choices=list(MODES.keys()),
-                        help='quick | full | stress | partition')
+    parser.add_argument('mode', nargs='?', default='full',
+                        choices=list(MODES.keys()),
+                        help='quick | full | stress | partition | realistic')
     args = parser.parse_args()
 
     cfg = MODES[args.mode]
@@ -409,7 +567,7 @@ def main():
 
     print(f"{C.BOLD}{C.B}")
     print("╔═══════════════════════════════════════════════════════╗")
-    print("║    CDC Pipeline — Benchmark v4 (E2E TPS thật)       ║")
+    print("║    CDC Pipeline — Benchmark v4 (E2E records/s thật)  ║")
     print("╚═══════════════════════════════════════════════════════╝")
     print(C.X)
 
@@ -467,30 +625,38 @@ def main():
 
     for target in cfg['levels']:
         print()
-        info(f"Mức: {C.BOLD}{target} TPS{C.X} × {cfg['duration']}s")
+        info(f"Mức: {C.BOLD}{target} records/s inject{C.X} × {cfg['duration']}s")
 
         cleanup()
         time.sleep(3)
 
-        result = run_e2e_test(target, cfg['duration'])
+        if args.mode == 'realistic':
+            result = run_e2e_realistic_test(target, cfg['duration'])
+            print(f"  {C.DIM}Inject rate:{C.X}      {result['inject_rate']} events/s")
+            print(f"  {C.DIM}  INSERT:{C.X}          {result['breakdown']['insert']}")
+            print(f"  {C.DIM}  UPDATE:{C.X}          {result['breakdown']['update']}")
+            print(f"  {C.DIM}  DELETE:{C.X}          {result['breakdown']['delete']}")
+            print(f"  {C.DIM}E2E records/s:{C.X}    {C.BOLD}{result['e2e_tps']}{C.X}  ← Kafka delta/tổng thời gian")
+            print(f"  {C.DIM}Kafka delta:{C.X}       {result['kafka_delta']} events")
+        else:
+            result = run_e2e_test(target, cfg['duration'])
+            print(f"  {C.DIM}Inject rate:{C.X}      {result['inject_tps']} records/s")
+            print(f"  {C.DIM}E2E records/s:{C.X}    {C.BOLD}{result['e2e_tps']}{C.X}  ← con số thật")
+            print(f"  {C.DIM}MySQL delta:{C.X}       {result['mysql_delta']}")
+            print(f"  {C.DIM}Mongo delta:{C.X}       {result['mongo_delta']}")
 
-        # Print
-        print(f"  {C.DIM}Inject TPS:{C.X}       {result['inject_tps']}")
-        print(f"  {C.DIM}E2E TPS thật:{C.X}     {C.BOLD}{result['e2e_tps']}{C.X}  ← con số thật")
-        print(f"  {C.DIM}MySQL delta:{C.X}       {result['mysql_delta']}")
-        print(f"  {C.DIM}Mongo delta:{C.X}       {result['mongo_delta']}")
         print(f"  {C.DIM}Lag còn lại:{C.X}       {result['lag_remaining']}")
         print(f"  {C.DIM}Thời gian inject:{C.X}  {result['inject_elapsed_s']}s")
         print(f"  {C.DIM}Thời gian drain:{C.X}   {result['drain_elapsed_s']}s")
         print(f"  {C.DIM}TỔNG thời gian:{C.X}    {result['total_elapsed_s']}s")
         print(f"  {C.DIM}Spark batch:{C.X}        avg {result['spark_batch_avg_ms']}ms, p95 {result['spark_batch_p95_ms']}ms")
-        print(f"  {C.DIM}Kafka rate:{C.X}         {result['kafka_rate_avg']} ev/s")
+        print(f"  {C.DIM}Kafka rate:{C.X}         {result['kafka_rate_avg']} events/s")
 
         ramp_results.append(result)
 
         # Bottleneck?
         if result['lag_remaining'] > 0 or not result['synced']:
-            warn(f"BOTTLENECK tại {target} TPS → E2E thật chỉ {result['e2e_tps']} ev/s")
+            warn(f"BOTTLENECK tại {target} records/s inject → E2E thật chỉ {result['e2e_tps']} records/s")
             if result['lag_remaining'] > 0:
                 warn(f"  Còn {result['lag_remaining']} records chưa sync")
             if not result['synced']:
@@ -513,7 +679,7 @@ def main():
             }
             break
         else:
-            ok(f"E2E TPS: {result['e2e_tps']} — pipeline kịp xử lý")
+            ok(f"E2E records/s: {result['e2e_tps']} — pipeline kịp xử lý")
             max_e2e_tps = max(max_e2e_tps, result['e2e_tps'])
 
     # ── Sustained test ────────────────────────────────────
@@ -525,7 +691,7 @@ def main():
 
     sustained_result = run_e2e_test(sustained_target, cfg['sustained_duration'])
 
-    print(f"  {C.DIM}E2E TPS thật:{C.X}     {C.BOLD}{sustained_result['e2e_tps']}{C.X}")
+    print(f"  {C.DIM}E2E records/s:{C.X}    {C.BOLD}{sustained_result['e2e_tps']}{C.X}")
     print(f"  {C.DIM}Records:{C.X}           {sustained_result['mongo_delta']}")
     print(f"  {C.DIM}Lag:{C.X}               {sustained_result['lag_remaining']}")
     print(f"  {C.DIM}Tổng thời gian:{C.X}    {sustained_result['total_elapsed_s']}s")
@@ -568,21 +734,26 @@ def main():
         json.dump(report, f, indent=2, ensure_ascii=False)
     ok(f"Đã lưu: {result_file}")
 
+    import shutil
+    latest_file = RESULTS_DIR / "latest_benchmark.json"
+    shutil.copy(result_file, latest_file)
+    info(f"Đã copy sang: {latest_file}")
+
     # ── Summary ───────────────────────────────────────────
     step("KẾT QUẢ")
 
-    print(f"\n  🎯 Max E2E TPS thật:    {C.BOLD}{max_e2e_tps}{C.X}")
+    print(f"\n  🎯 Max E2E records/s:   {C.BOLD}{max_e2e_tps}{C.X}")
 
     if bottleneck:
         print(f"  🚧 Bottleneck tại:      {bottleneck['at_tps']} TPS (inject)")
-        print(f"  🎯 E2E thật khi nghẽn:  {bottleneck['e2e_tps']} ev/s")
+        print(f"  🎯 E2E thật khi nghẽn:  {bottleneck['e2e_tps']} records/s")
         print(f"  📍 Tầng nghẽn:          {bottleneck['stage']}")
     else:
         print(f"  ✅ Không bottleneck: pipeline kịp xử lý tất cả mức test")
 
     sr = report['sustained']
     print(f"\n  📊 Chạy ổn định ({sustained_target} TPS × {cfg['sustained_duration']}s):")
-    print(f"      E2E TPS thật:     {sr['e2e_tps']}")
+    print(f"      E2E records/s:    {sr['e2e_tps']}")
     print(f"      Records đến Mongo: {sr['mongo_delta']}")
     print(f"      Lag còn lại:      {sr['lag_remaining']}")
     print(f"      Spark p50/p95:    {sr['spark_batch_avg_ms']}/{sr['spark_batch_p95_ms']}ms")

@@ -6,6 +6,12 @@ Thu thập metrics từ MySQL, MongoDB, Redis, Kafka
 và benchmark JSON để Prometheus đọc.
 """
 
+import os
+from dotenv import load_dotenv
+
+# Tải biến môi trường từ file .env nếu có
+load_dotenv()
+
 import time
 import json
 import pymysql
@@ -24,19 +30,19 @@ from datetime import datetime
 # =============================
 
 MYSQL_CONFIG = dict(
-    host="localhost",
-    port=3306,
-    user="root",
-    password="root",
-    db="inventory"
+    host=os.environ.get("MYSQL_HOST", "localhost"),
+    port=int(os.environ.get("MYSQL_PORT", 3306)),
+    user=os.environ.get("MYSQL_USER", "root"),
+    password=os.environ.get("MYSQL_PASSWORD", "root"),
+    db=os.environ.get("MYSQL_DB", "inventory")
 )
 
-MONGO_URI = "mongodb://localhost:27017"
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
 
-REDIS_HOST = "localhost"
-REDIS_PORT = 6379
+REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
 
-KAFKA_BROKER = "localhost:9092"
+KAFKA_BROKER = os.environ.get("KAFKA_BROKER", "localhost:9092")
 
 TOPICS = [
     "inventory.inventory.customers",
@@ -48,8 +54,11 @@ TOPICS = [
 # Benchmark JSON
 # =============================
 
-SCALABILITY_JSON = Path(__file__).parent / "benchmark" / "results" / "scalability_report.json"
-SCALING_JSON = Path(__file__).parent / "benchmark" / "results" / "scaling_results.json"
+BENCHMARK_DIR = Path(os.environ.get("BENCHMARK_DIR", Path(__file__).parent.parent.parent / "benchmark"))
+SCALABILITY_JSON = BENCHMARK_DIR / "results" / "scalability_report.json"
+SCALING_JSON = BENCHMARK_DIR / "results" / "scaling_results.json"
+LATEST_BENCHMARK_JSON = BENCHMARK_DIR / "results" / "latest_benchmark.json"
+TPS_RESULTS_JSON = BENCHMARK_DIR / "results" / "tps_results.json"
 
 
 # =============================
@@ -157,6 +166,51 @@ bench_scale_scl_p95 = Gauge("cdc_scale_scaled_p95", "Latency p95 scaled")
 
 
 # =============================
+# Real-time rate metrics
+# (delta / elapsed giữa 2 lần poll)
+# =============================
+
+mysql_insert_rate = Gauge(
+    "cdc_mysql_insert_rate",
+    "MySQL customer insert rate (records/s)"
+)
+
+mongo_write_rate = Gauge(
+    "cdc_mongo_write_rate",
+    "MongoDB customer write rate (records/s)"
+)
+
+kafka_rate_total = Gauge(
+    "cdc_kafka_rate_total",
+    "Kafka CDC event rate across all topics (events/s)"
+)
+
+lag_total = Gauge(
+    "cdc_lag_total",
+    "Record lag: MySQL customers - MongoDB customers"
+)
+
+# Spark batch duration không đo được từ bên ngoài, giữ gauge = 0 để benchmark không bị lỗi
+spark_batch_duration_ms = Gauge(
+    "cdc_spark_batch_duration_ms",
+    "Spark batch duration ms (placeholder, requires Spark internal metrics)"
+)
+
+
+# =============================
+# Rate tracking state
+# =============================
+
+_rate_state = {
+    "ts":          0.0,
+    "mysql_c":     0,
+    "mongo_c":     0,
+    "kafka_total": 0,
+}
+
+
+
+# =============================
 # Collect functions
 # =============================
 
@@ -167,17 +221,18 @@ def collect_mysql():
         cur = conn.cursor()
 
         cur.execute("SELECT COUNT(*) FROM customers")
-        mysql_customers.set(cur.fetchone()[0])
+        c_count = cur.fetchone()[0]
+        mysql_customers.set(c_count)
 
         cur.execute("SELECT COUNT(*) FROM orders")
         mysql_orders.set(cur.fetchone()[0])
 
         conn.close()
-        return True
+        return True, c_count
 
     except Exception as e:
         print(f"[MySQL ERROR] {e}")
-        return False
+        return False, 0
 
 
 def collect_mongo():
@@ -244,68 +299,86 @@ def collect_kafka():
 
         consumer.close()
 
-        kafka_customers_offset.set(offsets.get(TOPICS[0], 0))
-        kafka_orders_offset.set(offsets.get(TOPICS[1], 0))
+        cust_offset = offsets.get(TOPICS[0], 0)
+        ord_offset  = offsets.get(TOPICS[1], 0)
 
-        return True
+        kafka_customers_offset.set(cust_offset)
+        kafka_orders_offset.set(ord_offset)
+
+        return True, cust_offset + ord_offset
 
     except Exception as e:
         print(f"[Kafka ERROR] {e}")
-        return False
+        return False, 0
 
 
 def collect_benchmark():
 
     try:
-
+        # Đọc dữ liệu từ bản báo cáo scalability cũ (nếu có)
         if SCALABILITY_JSON.exists():
-
             sr = json.loads(SCALABILITY_JSON.read_text())
-
             lat = sr.get("latency") or {}
-
             bench_latency_p50.set(lat.get("p50_s") or 0)
             bench_latency_p95.set(lat.get("p95_s") or 0)
             bench_latency_p99.set(lat.get("p99_s") or 0)
             bench_latency_avg.set(lat.get("avg_s") or 0)
-
+            
             tp = sr.get("throughput_baseline") or {}
-
-            bench_throughput_e2e.set(tp.get("e2e_tps") or 0)
             bench_throughput_mysql.set(tp.get("mysql_tps") or 0)
             bench_sync_rate.set(tp.get("sync_rate_pct") or 0)
-
-            rl = sr.get("redis_latency") or {}
-
-            if rl:
-                bench_redis_p50.set(max((v.get("p50_ms") or 0) for v in rl.values()))
-                bench_redis_p99.set(max((v.get("p99_ms") or 0) for v in rl.values()))
-
+            
             cfg = sr.get("config") or {}
-
-            bench_kafka_partitions.set(cfg.get("kafka_partitions_orders") or 0)
             bench_spark_workers.set(cfg.get("spark_workers") or 0)
-
             bench_trigger_interval.set(2)
 
     except Exception as e:
-        print(f"[Benchmark ERROR] {e}")
+        print(f"[Benchmark ERROR scalability] {e}")
 
     try:
-
+        # Đọc dữ liệu từ bản báo cáo scaling cũ (nếu có)
         if SCALING_JSON.exists():
-
             cmp = json.loads(SCALING_JSON.read_text()).get("comparison") or {}
-
             bench_scale_baseline.set(cmp.get("baseline_tps") or 0)
             bench_scale_scaled.set(cmp.get("scaled_tps") or 0)
             bench_scale_improvement.set(cmp.get("throughput_improvement_pct") or 0)
-
             bench_scale_base_p95.set(cmp.get("baseline_p95_s") or 0)
             bench_scale_scl_p95.set(cmp.get("scaled_p95_s") or 0)
-
     except Exception as e:
         print(f"[Scaling ERROR] {e}")
+
+    try:
+        # Đọc dữ liệu từ run_benchmark_v4.py
+        if LATEST_BENCHMARK_JSON.exists():
+            data = json.loads(LATEST_BENCHMARK_JSON.read_text())
+            summary = data.get("summary") or {}
+            max_e2e_tps = summary.get("max_e2e_tps") or 0
+            bench_throughput_e2e.set(max_e2e_tps)
+            
+            sus = data.get("sustained") or {}
+            if "spark_batch_avg_ms" in sus:
+                bench_latency_avg.set(sus["spark_batch_avg_ms"] / 1000.0)
+            if "spark_batch_p95_ms" in sus:
+                bench_latency_p95.set(sus["spark_batch_p95_ms"] / 1000.0)
+                
+            cfg = data.get("config") or {}
+            bench_kafka_partitions.set(cfg.get("kafka_partitions") or 0)
+    except Exception as e:
+        print(f"[Latest Benchmark ERROR] {e}")
+
+    try:
+        # Đọc dữ liệu từ tps_benchmark.py
+        if TPS_RESULTS_JSON.exists():
+            data = json.loads(TPS_RESULTS_JSON.read_text())
+            results = data.get("results") or []
+            if results:
+                best = max(results, key=lambda x: x.get("e2e_tps", 0))
+                # Nếu latest_benchmark chưa set e2e_tps, dùng của tps_benchmark
+                if not LATEST_BENCHMARK_JSON.exists():
+                    bench_throughput_e2e.set(best.get("e2e_tps", 0))
+                bench_throughput_mysql.set(best.get("mysql_tps", 0))
+    except Exception as e:
+        print(f"[TPS Benchmark ERROR] {e}")
 
 
 def check_pipeline_health(mysql_ok, mongo_mc, mongo_mo):
@@ -357,17 +430,36 @@ if __name__ == "__main__":
 
         try:
 
-            mysql_ok = collect_mysql()
+            mysql_ok, cur_mysql_c = collect_mysql()
 
             mongo_mc, mongo_mo = collect_mongo()
 
             collect_redis()
 
-            collect_kafka()
+            kafka_ok, cur_kafka_total = collect_kafka()
 
             collect_benchmark()
 
             check_pipeline_health(mysql_ok, mongo_mc, mongo_mo)
+
+            # ── Tính rate metrics ──────────────────────────────
+            now = time.time()
+
+            if _rate_state["ts"] > 0:
+                elapsed = now - _rate_state["ts"]
+                if elapsed > 0:
+                    cur_mongo_c = mongo_mc if mongo_mc is not None else 0
+
+                    mysql_insert_rate.set(max(0.0, (cur_mysql_c - _rate_state["mysql_c"]) / elapsed))
+                    mongo_write_rate.set(max(0.0, (cur_mongo_c - _rate_state["mongo_c"]) / elapsed))
+                    kafka_rate_total.set(max(0.0, (cur_kafka_total - _rate_state["kafka_total"]) / elapsed))
+                    lag_total.set(max(0, cur_mysql_c - (mongo_mc if mongo_mc is not None else 0)))
+
+            _rate_state["ts"]          = now
+            _rate_state["mysql_c"]     = cur_mysql_c
+            _rate_state["mongo_c"]     = mongo_mc if mongo_mc is not None else 0
+            _rate_state["kafka_total"] = cur_kafka_total
+            # ───────────────────────────────────────────────────
 
             print(f"[{datetime.now()}] Metrics collected OK")
 

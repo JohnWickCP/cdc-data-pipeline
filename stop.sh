@@ -24,8 +24,7 @@ echo -e "${BOLD}  CDC Pipeline — Shutdown${NC}"
 echo -e "${BOLD}============================================${NC}"
 echo ""
 
-info "Dừng metrics exporter..."
-pkill -f "metrics_exporter.py" 2>/dev/null && log "Metrics exporter đã dừng" || log "Metrics exporter không chạy"
+
 
 cd "$COMPOSE_DIR"
 
