@@ -70,12 +70,12 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 |---|---|---|---|---|
 | 3.1 | Thêm panel real-time TPS/rate vào Grafana dashboard | High | ✅ | Row "Real-time Metrics" trong `cdc_fixed1.json`: timeseries rates + lag + spark batch + executor stats |
 | 3.2 | Benchmark mode `realistic`: 60% INSERT / 30% UPDATE / 10% DELETE | Medium | ✅ | Code đã có trong `run_benchmark_v4.py` (inject_realistic_load, run_e2e_realistic_test) |
-| 3.3 | So sánh đúng Scala vs Python (sau khi fix trigger interval) | Medium | ❌ | Phụ thuộc vào 2A.2 |
+| 3.3 | So sánh đúng Scala vs Python (sau khi fix trigger interval) | Medium | ✅ | Scala 370 rec/s vs Python ~82.5 rec/s (~4.5x). Python khó benchmark chính xác do events tồn đọng trong Kafka. Dùng Scala làm primary. |
 | 3.4 | Test Kafka partition > 1 | Low | ❌ | Benchmark `partition` mode đã có, chưa test thực tế |
 | 3.5 | Spark batch duration thật (via `StreamingQueryListener`) | Low | ✅ | Hoàn thành trong 2C.1 |
-| 3.6 | Multi-table CDC (ngoài customers/orders) | Low | ❌ | Code đã handle, chỉ cần config thêm |
-| 3.7 | Grafana alert khi lag > ngưỡng | Low | ❌ | |
-| 3.8 | Benchmark trên cloud VM | Low | ❌ | Docs có hướng dẫn tại `docs/VM_SETUP.md` |
+| 3.6 | Multi-table CDC (ngoài customers/orders) | Low | ✅ | Debezium+Spark+Mongo+Redis đã handle cả `orders`. Demo injection cũng insert orders (60% customers, 1-2 orders mỗi người) |
+| 3.7 | Grafana alert khi lag > ngưỡng | Low | ✅ | `monitoring/grafana/provisioning/alerting/cdc_alerts.yml`: lag≥100(warning), lag≥500(critical), batch≥5000ms(warning) |
+| 3.8 | Benchmark trên cloud VM | Low | ❌ | Docs có hướng dẫn tại `docs/VM_SETUP.md` — skip (cần VM riêng) |
 | 3.9 | Live Demo Dashboard (interactive, nhấn nút, xem real-time) | High | ✅ | `demo/demo_server.py` + `demo/index.html`, chạy: `bash demo/run_demo.sh` → `http://localhost:8888` |
 | 3.10 | Lưu và so sánh kết quả benchmark qua nhiều lần chạy | Medium | ✅ | `benchmark/results/history.jsonl` + `benchmark/compare_runs.py` |
 
@@ -105,6 +105,7 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 | Phase 2B bug fixes | 2026-05-07 | 2B.1: Redis counter fix (INSERT+DELETE+UPDATE test PASS), 2B.2: Grafana auto-restart, 2B.3: Spark executor metrics |
 | Phase 2C bug fixes | 2026-05-07 | 2C.1: StreamingQueryListener → Redis → exporter. batch_duration_ms thật: ~350–1300ms |
 | Phase 3 — demo + Grafana + benchmark compare | 2026-05-07 | 3.1: Grafana real-time panels; 3.9: demo_server.py + index.html; 3.10: history.jsonl + compare_runs.py |
+| Phase 3 — multi-table + alerts | 2026-05-07 | 3.6: orders injection in demo + pipeline already handled; 3.7: Grafana alerting rules YAML |
 
 ---
 
@@ -119,3 +120,5 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 | 2026-05-07 | Hoàn thành Phase 2B (2B.1: Redis counter fix + rebuild JAR, 2B.2: Grafana restart, 2B.3: Spark executor metrics) |
 | 2026-05-07 | Hoàn thành Phase 2C (2C.1: StreamingQueryListener ghi batch duration vào Redis, exporter đọc thật) |
 | 2026-05-07 | Phase 3: demo dashboard (nhấn nút, real-time), Grafana real-time panels, benchmark history + compare |
+| 2026-05-07 | Phase 3 tiếp: 3.6 orders injection vào demo, 3.7 Grafana alert rules, 3.3 Scala vs Python so sánh xong |
+| 2026-05-07 | Benchmark fixes: drain condition bug (target_mongo=before+delta), max_e2e_tps khi bottleneck, detect_spark_engine(), Engine column trong compare_runs.py, Windows UTF-8 fix |

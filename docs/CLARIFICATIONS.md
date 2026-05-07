@@ -214,3 +214,60 @@ Các hệ thống production thường benchmark với:
 - Replication factor > 1
 
 Số 400 records/s trên laptop Docker là **throughput thật của setup localhost**, không phải giới hạn trên của công nghệ.
+
+---
+
+## 9. "Drain" là gì trong benchmark?
+
+### Định nghĩa
+
+**Drain** = giai đoạn chờ sau khi dừng inject, để pipeline xử lý hết phần còn tồn đọng.
+
+```
+[inject phase]  INSERT 500 records vào MySQL  (t = 0 → 5s)
+[drain phase]   Spark đang xử lý backlog       (t = 5s → ~10s)
+                → MongoDB nhận đủ 500 documents
+[done]          E2E time = 10s → E2E rate = 50 rec/s
+```
+
+### Tại sao cần drain?
+
+Spark Structured Streaming dùng **micro-batch với trigger 5s**. Khi bạn dừng inject ở giây thứ 5, Spark vẫn đang xử lý batch hiện tại. Nếu đo ngay, MongoDB chưa nhận hết → E2E rate bị undercount.
+
+### Drain condition trong code
+
+```python
+# Đúng (delta-based):
+target_mongo = before_mongo + mysql_delta
+while mongo_count < target_mongo:
+    time.sleep(0.5)
+
+# Sai (absolute, đã fix):
+# while mongo_count < after_mysql:  ← bị lừa bởi data cũ từ run trước
+```
+
+---
+
+## 10. "Latency" trong CDC pipeline — đo gì và bao nhiêu?
+
+### Latency per-record (không đo được trực tiếp)
+
+Benchmark này **không đo latency từng record** vì không có timestamp gắn vào mỗi message.
+
+Latency thực tế ≈ **Spark trigger interval** = 5s (worst case):
+- Record INSERT vào MySQL ngay trước trigger → phải chờ 5s đến batch tiếp theo
+- Record INSERT ngay sau trigger → chờ ~0s (xử lý trong batch hiện tại)
+- Trung bình: ~2.5s (khi không có backlog)
+
+### Spark batch duration (đo được sau fix 2C.1)
+
+`spark:batch_duration_ms` trong Redis = thời gian Spark xử lý 1 micro-batch:
+- ~350–1300ms: Spark đọc Kafka → transform → ghi MongoDB + Redis
+- Nhỏ hơn trigger interval (5000ms) → tốt (pipeline không bị trễ)
+- Bằng hoặc lớn hơn 5000ms → cảnh báo (Grafana alert kích hoạt)
+
+### Kafka lag (đo được qua offset)
+
+`cdc_lag_total` = số messages trong Kafka chưa được Spark consume.
+- Lag = 0: pipeline theo kịp real-time
+- Lag tăng: Spark xử lý chậm hơn MySQL insert → backlog đang tích lũy

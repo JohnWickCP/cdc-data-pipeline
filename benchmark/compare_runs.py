@@ -9,8 +9,12 @@ Usage:
     python benchmark/compare_runs.py --detail     # Đọc full JSON từng run
 """
 
-import json, argparse, sys
+import json, argparse, sys, io
 from pathlib import Path
+
+# Fix Windows console encoding (cp1252 → utf-8)
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 RESULTS_DIR = Path(__file__).parent / "results"
 HISTORY_FILE = RESULTS_DIR / "history.jsonl"
@@ -67,7 +71,8 @@ def print_table(entries):
 
     cols = [
         ("Timestamp",      "ts",           22),
-        ("Mode",           "mode",         10),
+        ("Mode",           "mode",          8),
+        ("Engine",         "engine",        7),
         ("Max E2E /s",     "max_e2e_tps",  11),
         ("Sus E2E /s",     "sus_tps",      11),
         ("Spark p50 ms",   "spark_p50_ms", 13),

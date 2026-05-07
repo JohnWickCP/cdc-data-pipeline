@@ -268,12 +268,13 @@ def run_e2e_test(target_tps, duration_s=30, max_drain_s=120):
     after_mysql = cur.fetchone()[0]
     mysql_delta = after_mysql - before_mysql
 
-    # Chờ MongoDB sync XONG (đếm cho đến khi = MySQL)
+    # Chờ MongoDB sync XONG: phải tăng thêm đúng mysql_delta từ baseline
+    target_mongo = before_mongo + mysql_delta
     drain_start = time.time()
     synced = False
     while time.time() - t_start < duration_s + max_drain_s:
         mongo_count = mongo["customers"].count_documents({})
-        if mongo_count >= after_mysql:
+        if mongo_count >= target_mongo:
             synced = True
             break
         time.sleep(0.5)
@@ -422,6 +423,27 @@ def get_hardware():
         "ram_gb": round(int(run("free -m | awk '/^Mem:/{print $2}'") or "0") / 1024, 1),
         "disk_free": run(f"df -h {PROJECT_DIR} | tail -1 | awk '{{print $4}}'"),
     }
+
+
+def detect_spark_engine():
+    """Detect Scala JAR vs PySpark via Spark Master app name."""
+    urls = [SPARK_MASTER_URL, "http://localhost:8080/json/"]
+    for url in urls:
+        try:
+            import urllib.request, json
+            with urllib.request.urlopen(url, timeout=3) as r:
+                data = json.loads(r.read())
+            apps = data.get("activeapps", [])
+            if not apps:
+                continue
+            name = apps[0].get("name", "")
+            if "CDC-MySQL-To-MongoDB-Redis" in name:
+                return "scala"
+            elif "Pipeline" in name or "Python" in name or "python" in name.lower():
+                return "python"
+        except Exception:
+            continue
+    return "unknown"
 
 
 # ══════════════════════════════════════════════════════════
@@ -601,12 +623,15 @@ def main():
 
     # Spark info
     sm = sample_metrics()
+    spark_engine = detect_spark_engine()
     spark_info = {
         "executor_cores": int(sm.get('spark_cores', 0)),
         "executor_memory_mb": int(sm.get('spark_mem', 0)),
         "kafka_partitions": current_partitions,
+        "engine": spark_engine,
     }
     info(f"Spark cores: {spark_info['executor_cores']}, Memory: {spark_info['executor_memory_mb']}MB")
+    info(f"Spark engine: {spark_engine.upper()}")
 
     # Warmup
     step("Khởi động nóng (10s, 5 records/s)")
@@ -677,6 +702,7 @@ def main():
                 "stage": stage,
                 "lag": result['lag_remaining'],
             }
+            max_e2e_tps = max(max_e2e_tps, result['e2e_tps'])
             break
         else:
             ok(f"E2E records/s: {result['e2e_tps']} — pipeline kịp xử lý")
@@ -746,6 +772,7 @@ def main():
         "ts":            report["timestamp"],
         "run_id":        report["run_id"],
         "mode":          args.mode,
+        "engine":        spark_info.get("engine", "unknown"),
         "hw":            hw_short,
         "max_e2e_tps":   max_e2e_tps,
         "sus_tps":       sustained_result.get("e2e_tps"),

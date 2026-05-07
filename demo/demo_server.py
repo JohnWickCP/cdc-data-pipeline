@@ -58,7 +58,8 @@ _NAMES = [
     "Trương Văn Phúc","Đinh Thị Quỳnh","Lý Văn Sơn",    "Tô Thị Tâm",
     "Mai Văn Tuấn",  "Lâm Thị Uyên",  "Cao Văn Vinh",  "Hà Thị Xuân",
 ]
-_DOMAINS = ["gmail.com", "yahoo.com", "outlook.com", "company.vn", "mail.vn", "edu.vn"]
+_DOMAINS  = ["gmail.com", "yahoo.com", "outlook.com", "company.vn", "mail.vn", "edu.vn"]
+_STATUSES = ["PENDING", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"]
 
 def _rand_email(name: str) -> str:
     slug = "".join(c for c in name.split()[-1].lower()
@@ -93,15 +94,35 @@ def _load_worker(rate: int):
             if not _state["running"]:
                 break
         try:
-            rows = [
-                (random.choice(_NAMES), _rand_email("demo"), _rand_phone())
-                for _ in range(batch_size)
-            ]
             cur = conn.cursor()
+
+            # Insert customers
+            _names_batch = [random.choice(_NAMES) for _ in range(batch_size)]
+            cust_rows = [
+                (n, _rand_email(n), _rand_phone()) for n in _names_batch
+            ]
             cur.executemany(
                 "INSERT INTO customers (name, email, phone) VALUES (%s, %s, %s)",
-                rows,
+                cust_rows,
             )
+            first_id = cur.lastrowid  # first auto_increment ID of this batch
+
+            # Insert orders — ~60% customers nhận 1-2 orders
+            order_rows = []
+            for i in range(batch_size):
+                if random.random() < 0.6:
+                    cust_id = first_id + i
+                    n_orders = random.randint(1, 2)
+                    for _ in range(n_orders):
+                        amount = round(random.uniform(50_000, 3_000_000), 2)
+                        status = random.choice(_STATUSES)
+                        order_rows.append((cust_id, amount, status))
+            if order_rows:
+                cur.executemany(
+                    "INSERT INTO orders (customer_id, total_amount, status) VALUES (%s, %s, %s)",
+                    order_rows,
+                )
+
             conn.commit()
             with _lock:
                 _state["injected"] += batch_size
