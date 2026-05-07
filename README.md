@@ -141,7 +141,7 @@ Dashboard tương tác để demo cho hội đồng — nhấn nút, xem metrics
 
 ```bash
 # Cài dependencies (1 lần)
-pip install -r requirements-host.txt
+pip install -r demo/requirements.txt
 
 # Chạy demo server
 bash demo/run_demo.sh       # Linux / Mac / Git Bash
@@ -173,7 +173,6 @@ cdc-data-pipeline/
 ├── test_smoke.sh               # ✓ Smoke test 43 checks
 ├── run_bench.sh                # 📊 Chạy benchmark (quick/full/stress/realistic)
 ├── detect_hardware.sh          # 🖥 Phát hiện cấu hình máy, gợi ý profile
-├── requirements-host.txt       # Python deps cho demo server (host-side)
 ├── README.md
 ├── TASKS.md                    # Task tracking
 │
@@ -190,9 +189,7 @@ cdc-data-pipeline/
 │   ├── run_demo.bat            # Chạy demo server (Windows)
 │   ├── .env.example            # Config demo server (copy → .env)
 │   ├── requirements.txt        # Flask + pymysql + pymongo + redis
-│   ├── connector.json          # Cấu hình Debezium MySQL connector
-│   ├── init.sql                # MySQL schema
-│   └── demodata.sql            # Dữ liệu mẫu
+│   └── config/                 # Debezium connector.json, init.sql, demodata.sql
 │
 ├── jobs/
 │   ├── cdc-mysql-to-mongodb-redis_2.12-1.0.jar   # Scala JAR đã build sẵn

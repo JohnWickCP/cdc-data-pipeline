@@ -367,13 +367,13 @@ if echo "$EXISTING" | grep -q "mysql-inventory-connector"; then
         sleep 3
         curl -sf -X POST http://localhost:8083/connectors \
             -H "Content-Type: application/json" \
-            -d @"../demo/connector.json" > /dev/null 2>&1 || true
+            -d @"../demo/config/connector.json" > /dev/null 2>&1 || true
         log "Connector đã tạo lại"
     fi
 else
     curl -sf -X POST http://localhost:8083/connectors \
         -H "Content-Type: application/json" \
-        -d @"../demo/connector.json" > /dev/null 2>&1 || true
+        -d @"../demo/config/connector.json" > /dev/null 2>&1 || true
     log "Connector đã đăng ký mới"
 fi
 

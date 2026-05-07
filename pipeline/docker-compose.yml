@@ -76,7 +76,7 @@ services:
       - --innodb-buffer-pool-size=${MYSQL_INNODB_BUFFER_POOL_SIZE:-536870912}
     volumes:
       - mysql_data:/var/lib/mysql
-      - ../demo/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ../demo/config/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
       interval: 10s

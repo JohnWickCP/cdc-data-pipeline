@@ -153,6 +153,7 @@ def api_status():
     return jsonify({
         **s,
         "elapsed_s": elapsed,
+        "engine": _detect_engine(),
         "config": {
             "mysql": f"{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}",
             "redis": f"{REDIS_HOST}:{REDIS_PORT}",
@@ -218,6 +219,41 @@ def api_mongo():
         return jsonify({"ok": True, "count": count, "recent": recent})
     except Exception as e:
         return jsonify({"ok": False, "count": 0, "recent": [], "error": str(e)})
+
+@app.route("/api/orders")
+def api_orders():
+    try:
+        client = pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000)
+        db     = client["inventory"]
+        count  = db["orders"].count_documents({})
+        recent = list(
+            db["orders"]
+            .find({}, {"_id": 0, "id": 1, "customer_id": 1, "total_amount": 1, "status": 1})
+            .sort("id", -1)
+            .limit(8)
+        )
+        return jsonify({"ok": True, "count": count, "recent": recent})
+    except Exception as e:
+        return jsonify({"ok": False, "count": 0, "recent": [], "error": str(e)})
+
+def _detect_engine() -> str:
+    for url in [f"http://{os.getenv('SPARK_MASTER_HOST', 'localhost')}:8080/json/",
+                "http://localhost:8080/json/"]:
+        try:
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=2) as r:
+                data = json.loads(r.read())
+            apps = data.get("activeapps", [])
+            if not apps:
+                continue
+            name = apps[0].get("name", "")
+            if "CDC-MySQL-To-MongoDB-Redis" in name:
+                return "scala"
+            if "Pipeline" in name or "python" in name.lower():
+                return "python"
+        except Exception:
+            continue
+    return "unknown"
 
 @app.route("/api/metrics")
 def api_metrics():

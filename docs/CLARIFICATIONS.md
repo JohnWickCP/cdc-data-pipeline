@@ -271,3 +271,70 @@ Latency thực tế ≈ **Spark trigger interval** = 5s (worst case):
 `cdc_lag_total` = số messages trong Kafka chưa được Spark consume.
 - Lag = 0: pipeline theo kịp real-time
 - Lag tăng: Spark xử lý chậm hơn MySQL insert → backlog đang tích lũy
+
+---
+
+## 11. Tại sao con số benchmark trông ấn tượng — và test chuẩn hơn sẽ như thế nào?
+
+### Tại sao 370 rec/s trên laptop trông cao?
+
+Setup hiện tại được **tối ưu hóa không chủ ý**:
+
+| Yếu tố | Setup này | Production thật |
+|---|---|---|
+| Network | Localhost Docker bridge ≈ 0ms | Cross-datacenter 1–50ms |
+| MySQL → Kafka | In-container loopback | Network TCP thật |
+| Replication | 0 (single broker, single node) | Kafka RF=3, MongoDB replica set |
+| Concurrent load | Single-threaded inject | Multi-producer, multi-consumer |
+| Durability | fsync tắt trong dev | Bật, gây I/O wait |
+
+**Kết quả**: Mọi latency đều bị loại bỏ, chỉ còn Spark processing time. Số 370 rec/s là **real nhưng optimistic** — đây là ceiling của single-node localhost setup, không phải throughput kỳ vọng của distributed cluster.
+
+### Điểm thực sự ấn tượng
+
+Con số không phải thứ nên highlight. Thứ đáng nói là:
+- **Kiến trúc scale ngang được**: thêm Kafka partition → thêm Spark worker → throughput tăng linear
+- **Consistency**: Spark exactly-once semantics, idempotent MongoDB upsert
+- **Observability**: metrics từ mọi stage (MySQL → Kafka → Spark → MongoDB → Redis)
+- **Fault tolerance**: nếu Spark crash, checkpoint tự resume từ offset cuối
+
+### Cách test chuẩn hơn trong tương lai
+
+#### 1. Đo latency per-record (hiện tại không có)
+```sql
+-- Thêm cột timestamp vào MySQL
+ALTER TABLE customers ADD COLUMN created_at DATETIME(3) DEFAULT NOW(3);
+-- Debezium truyền created_at → Spark → MongoDB
+-- Đo: MongoDB.insert_time - MySQL.created_at = true E2E latency
+```
+Expected: 2–6s (do Spark trigger 5s)
+
+#### 2. Multi-producer concurrent load
+```python
+# Thay vì 1 thread inject:
+from concurrent.futures import ThreadPoolExecutor
+with ThreadPoolExecutor(max_workers=4) as ex:
+    ex.map(inject_batch, [rate//4]*4)
+# → Stress test connection pool, transaction isolation
+```
+
+#### 3. Kafka replication + fault test
+```bash
+# Tăng replication factor lên 3 (cần 3 Kafka brokers)
+KAFKA_NUM_PARTITIONS=3 bash start.sh
+# Kill 1 broker → đo recovery time
+```
+
+#### 4. Sustained load test (8h+)
+Hiện tại benchmark chạy tối đa vài phút. Production cần:
+- Chạy 8 giờ liên tục, đo throughput drift
+- Monitor memory leak trong Spark
+- Xem Kafka offset có tích lũy dần không
+
+#### 5. So sánh Kafka partition scaling
+Benchmark mode `partition` đã có — chạy với 1, 2, 4, 8 partitions:
+```bash
+bash run_bench.sh partition
+python benchmark/compare_runs.py --mode partition
+```
+Expected: throughput tăng ~linear đến khi bottleneck chuyển sang MongoDB write.

@@ -188,6 +188,38 @@ footer {
 .cdot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
 .cdot.err { background: var(--red); }
 
+/* ── Engine badge ── */
+.engine-badge {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700;
+  font-family: 'JetBrains Mono', monospace; letter-spacing: .5px;
+  border: 1px solid; text-transform: uppercase;
+}
+.engine-badge.scala  { background: rgba(87,148,242,.12); border-color: var(--blue); color: var(--blue); }
+.engine-badge.python { background: rgba(255,152,48,.12);  border-color: var(--orange); color: var(--orange); }
+.engine-badge.unk    { background: rgba(142,142,142,.1);  border-color: var(--dim); color: var(--dim); }
+
+/* ── Executor stats ── */
+.exec-row { display: flex; gap: 12px; margin-top: 8px; }
+.exec-pill {
+  display: flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 4px;
+  background: var(--card2); font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--dim);
+}
+.exec-pill .ep-v { color: #37afd2; font-weight: 600; }
+
+/* ── Orders section ── */
+.orders-grid { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start; }
+.orders-count-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
+  padding: 18px 22px; text-align: center; min-width: 130px;
+}
+.orders-count-card .oc-v {
+  font-size: 36px; font-weight: 700; font-family: 'JetBrains Mono', monospace;
+  color: var(--orange); letter-spacing: -1px;
+}
+.orders-count-card .oc-l { font-size: 11px; color: var(--dim); margin-top: 4px; text-transform: uppercase; letter-spacing: .5px; }
+.orders-count-card .oc-rev { font-size: 13px; font-weight: 600; color: var(--green); margin-top: 8px; }
+
 /* ── Animations ── */
 @keyframes flash { 0%{opacity:.5;transform:scale(.97)} 100%{opacity:1;transform:scale(1)} }
 .flash { animation: flash .25s ease-out; }
@@ -224,6 +256,7 @@ footer {
     <div class="pulse"></div>
     <span id="statusText">PIPELINE UP</span>
   </div>
+  <div class="engine-badge unk" id="engineBadge">⚙ —</div>
 </header>
 
 <!-- ── Main ── -->
@@ -290,6 +323,10 @@ footer {
       <div class="sc-val" id="sSpark">—</div>
       <div class="sc-sub" id="sSparkSub">ms / 5000ms trigger</div>
       <div class="sp-bar-wrap"><div class="sp-bar-fill" id="spBar" style="width:0%"></div></div>
+      <div class="exec-row">
+        <div class="exec-pill">Cores <span class="ep-v" id="execCores">—</span></div>
+        <div class="exec-pill">RAM <span class="ep-v" id="execMem">—</span></div>
+      </div>
     </div>
   </div>
 
@@ -353,6 +390,27 @@ footer {
       </div>
     </div>
 
+  </div>
+
+  <!-- Orders section -->
+  <div class="chart-card">
+    <div class="card-hdr">
+      <div class="card-title">🛒 Orders — MongoDB</div>
+      <span style="font-size:11px;color:var(--dim)" id="ordersTs">—</span>
+    </div>
+    <div class="orders-grid">
+      <div class="orders-count-card">
+        <div class="oc-v" id="ordCount">—</div>
+        <div class="oc-l">orders total</div>
+        <div class="oc-rev" id="ordRev">—</div>
+      </div>
+      <table class="data-tbl">
+        <thead><tr><th>Order ID</th><th>Customer ID</th><th>Amount</th><th>Status</th></tr></thead>
+        <tbody id="ordersTbody">
+          <tr><td colspan="4" style="text-align:center;color:var(--dim);padding:20px 0">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <!-- Footer -->
@@ -488,11 +546,12 @@ function updateBtn() {
 // ── Data refresh ────────────────────────────────────────
 async function refresh() {
   try {
-    const [m, rd, mg, st] = await Promise.all([
+    const [m, rd, mg, st, ord] = await Promise.all([
       fetch('/api/metrics').then(r => r.json()),
       fetch('/api/redis').then(r => r.json()),
       fetch('/api/mongo').then(r => r.json()),
       fetch('/api/status').then(r => r.json()),
+      fetch('/api/orders').then(r => r.json()),
     ]);
 
     // ── Stat cards ──
@@ -540,6 +599,18 @@ async function refresh() {
     badge.className = `badge ${pipeUp ? 'up' : 'down'}`;
     $('statusText').textContent = pipeUp ? 'PIPELINE UP' : 'PIPELINE DOWN';
 
+    // Engine badge
+    const eng = st.engine || 'unknown';
+    const eb  = $('engineBadge');
+    eb.className = `engine-badge ${eng === 'scala' ? 'scala' : eng === 'python' ? 'python' : 'unk'}`;
+    eb.textContent = eng === 'scala' ? '⚡ Scala' : eng === 'python' ? '🐍 Python' : '⚙ —';
+
+    // Executor stats
+    const cores = m['cdc_spark_executor_cores'];
+    const memMb = m['cdc_spark_executor_memory_mb'];
+    $('execCores').textContent = cores != null && cores > 0 ? cores : '—';
+    $('execMem').textContent   = memMb != null && memMb > 0 ? `${(memMb/1024).toFixed(1)} GB` : '—';
+
     // Chart
     pushChart(m['cdc_mysql_insert_rate'], m['cdc_mongo_write_rate'], m['cdc_kafka_rate_total']);
 
@@ -581,6 +652,33 @@ async function refresh() {
         ).join('');
       }
       $('redisTs').textContent = ts;
+    }
+
+    // Orders table
+    const ordTs = new Date().toLocaleTimeString('vi-VN');
+    $('ordersTs').textContent = ordTs;
+    if (ord.ok) {
+      $('ordCount').textContent = ord.count.toLocaleString('vi-VN');
+      $('ordRev').textContent   = rd.ok && rd.orders_revenue
+        ? `$${rd.orders_revenue.toLocaleString('en-US', { maximumFractionDigits: 0 })} revenue`
+        : '—';
+      if (ord.recent && ord.recent.length) {
+        $('ordersTbody').innerHTML = ord.recent.map(o => {
+          const statusColor = {
+            DELIVERED: 'var(--green)', SHIPPED: 'var(--blue)',
+            PROCESSING: 'var(--orange)', PENDING: 'var(--dim)',
+            CANCELLED: 'var(--red)',
+          }[o.status] || 'var(--dim)';
+          return `<tr>
+            <td class="id-c">#${o.id ?? '—'}</td>
+            <td style="color:var(--purple)">cust:${o.customer_id ?? '—'}</td>
+            <td style="color:var(--green)">$${o.total_amount != null ? Number(o.total_amount).toLocaleString('en-US', {maximumFractionDigits:0}) : '—'}</td>
+            <td><span style="color:${statusColor};font-weight:600;font-size:11px">${o.status ?? '—'}</span></td>
+          </tr>`;
+        }).join('');
+      } else {
+        $('ordersTbody').innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--dim);padding:14px 0">No orders yet — start the demo to inject data</td></tr>';
+      }
     }
 
     // Footer
