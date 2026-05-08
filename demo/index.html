@@ -86,6 +86,12 @@ main { padding: 16px 24px; display: flex; flex-direction: column; gap: 14px; max
 .start-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(37,99,235,.45); }
 .start-btn.running { background: linear-gradient(135deg, #dc2626, #b91c1c); }
 .start-btn.running:hover { box-shadow: 0 4px 14px rgba(220,38,38,.45); }
+.clear-btn {
+  background: transparent; border: 1px solid #6b7280; color: #9ca3af;
+  padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px;
+  font-weight: 600; transition: all .15s; white-space: nowrap;
+}
+.clear-btn:hover { border-color: #ef4444; color: #ef4444; }
 .session-info { margin-left: auto; display: flex; gap: 20px; }
 .s-stat { display: flex; flex-direction: column; align-items: flex-end; }
 .s-stat .v { font-size: 18px; font-weight: 700; color: var(--orange); font-family: 'JetBrains Mono', monospace; }
@@ -220,6 +226,18 @@ footer {
 .orders-count-card .oc-l { font-size: 11px; color: var(--dim); margin-top: 4px; text-transform: uppercase; letter-spacing: .5px; }
 .orders-count-card .oc-rev { font-size: 13px; font-weight: 600; color: var(--green); margin-top: 8px; }
 
+/* ── Comparison ── */
+.cmp-grid { display: grid; grid-template-columns: 1fr 28px 1fr; gap: 0 10px; align-items: start; }
+.cmp-arrow { display: flex; align-items: center; justify-content: center; font-size: 22px; color: var(--blue); padding-top: 34px; }
+.cmp-panel-hdr { font-size: 11px; font-weight: 600; margin-bottom: 6px; padding: 5px 8px; border-radius: 5px; }
+.mysql-hdr  { background: rgba(87,148,242,.1);  color: var(--blue); }
+.mongo-hdr  { background: rgba(115,191,105,.1); color: var(--green); }
+.raw-email     { color: var(--blue)   !important; }
+.masked-email  { color: var(--orange) !important; font-weight: 600; }
+.field-dropped { color: var(--red)    !important; opacity: .55; text-decoration: line-through; font-size: 11px; }
+.cmp-legend { display: flex; gap: 16px; margin-bottom: 10px; font-size: 11px; flex-wrap: wrap; }
+@media (max-width: 1100px) { .cmp-grid { grid-template-columns: 1fr; } .cmp-arrow { display: none; } }
+
 /* ── Animations ── */
 @keyframes flash { 0%{opacity:.5;transform:scale(.97)} 100%{opacity:1;transform:scale(1)} }
 .flash { animation: flash .25s ease-out; }
@@ -275,6 +293,7 @@ footer {
       <span id="btnIcon">▶</span>
       <span id="btnLabel">START DEMO</span>
     </button>
+    <button class="clear-btn" id="clearBtn" title="Xóa toàn bộ dữ liệu demo">🗑 CLEAR DATA</button>
     <div class="session-info">
       <div class="s-stat">
         <span class="v" id="injCount">0</span>
@@ -343,25 +362,43 @@ footer {
     <div class="chart-wrap"><canvas id="chart"></canvas></div>
   </div>
 
-  <!-- Data tables -->
-  <div class="data-grid">
-
-    <!-- MongoDB recent records -->
-    <div class="tc">
-      <div class="card-hdr">
-        <div class="card-title">🍃 MongoDB — Recent Records</div>
-        <span style="font-size:11px;color:var(--dim)" id="mongoTs">—</span>
-      </div>
-      <table class="data-tbl">
-        <thead><tr><th>ID</th><th>Name</th><th>Email (masked)</th><th>Phone</th></tr></thead>
-        <tbody id="mongoTbody">
-          <tr><td colspan="4" style="text-align:center;color:var(--dim);padding:20px 0">Loading...</td></tr>
-        </tbody>
-      </table>
+  <!-- Transformation comparison -->
+  <div class="chart-card">
+    <div class="card-hdr">
+      <div class="card-title">🔄 Data Transformation — MySQL raw → MongoDB processed</div>
+      <span style="font-size:11px;color:var(--dim)" id="cmpTs">—</span>
     </div>
+    <div class="cmp-legend">
+      <span style="color:var(--blue)">■ Raw (MySQL)</span>
+      <span style="color:var(--orange)">■ Email đã mask</span>
+      <span style="color:var(--red);text-decoration:line-through">■ Field bị xóa</span>
+      <span style="color:var(--dim)">⏳ = chưa sync</span>
+    </div>
+    <div class="cmp-grid">
+      <div>
+        <div class="cmp-panel-hdr mysql-hdr">🗄 MySQL — Dữ liệu gốc (chưa xử lý)</div>
+        <table class="data-tbl">
+          <thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Created At</th></tr></thead>
+          <tbody id="cmpMysqlBody">
+            <tr><td colspan="5" style="text-align:center;color:var(--dim);padding:16px 0">Chờ dữ liệu...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="cmp-arrow">⟶</div>
+      <div>
+        <div class="cmp-panel-hdr mongo-hdr">🍃 MongoDB — Sau khi pipeline xử lý</div>
+        <table class="data-tbl">
+          <thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Created At</th></tr></thead>
+          <tbody id="cmpMongoBody">
+            <tr><td colspan="5" style="text-align:center;color:var(--dim);padding:16px 0">Chờ sync...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 
-    <!-- Redis live state -->
-    <div class="tc">
+  <!-- Redis live state -->
+  <div class="tc">
       <div class="card-hdr">
         <div class="card-title">⚡ Redis — Live State</div>
         <span style="font-size:11px;color:var(--dim)" id="redisTs">—</span>
@@ -389,8 +426,6 @@ footer {
         <div id="topC"><span style="color:var(--dim);font-size:12px">No order data yet</span></div>
       </div>
     </div>
-
-  </div>
 
   <!-- Orders section -->
   <div class="chart-card">
@@ -530,6 +565,19 @@ $('startBtn').addEventListener('click', async () => {
   }
 });
 
+$('clearBtn').addEventListener('click', async () => {
+  if (isRunning) { alert('Dừng demo trước khi clear.'); return; }
+  if (!confirm('Xóa toàn bộ dữ liệu trong MySQL, MongoDB và Redis?')) return;
+  const btn = $('clearBtn');
+  btn.textContent = '⏳ Clearing...'; btn.disabled = true;
+  try {
+    const res = await fetch('/api/clear', { method: 'POST' });
+    const d   = await res.json();
+    btn.textContent = d.ok ? '✓ Cleared' : '✗ Error';
+    setTimeout(() => { btn.textContent = '🗑 CLEAR DATA'; btn.disabled = false; }, 2000);
+  } catch { btn.textContent = '✗ Error'; btn.disabled = false; }
+});
+
 function updateBtn() {
   const btn = $('startBtn');
   if (isRunning) {
@@ -546,12 +594,13 @@ function updateBtn() {
 // ── Data refresh ────────────────────────────────────────
 async function refresh() {
   try {
-    const [m, rd, mg, st, ord] = await Promise.all([
+    const [m, rd, mg, st, ord, cmp] = await Promise.all([
       fetch('/api/metrics').then(r => r.json()),
       fetch('/api/redis').then(r => r.json()),
       fetch('/api/mongo').then(r => r.json()),
       fetch('/api/status').then(r => r.json()),
       fetch('/api/orders').then(r => r.json()),
+      fetch('/api/comparison').then(r => r.json()),
     ]);
 
     // ── Stat cards ──
@@ -620,20 +669,8 @@ async function refresh() {
     setTxt('injCount',   st.injected,  false);
     setTxt('injElapsed', fmtTime(st.elapsed_s || 0), false);
 
-    // MongoDB table
-    const ts = new Date().toLocaleTimeString('vi-VN');
-    if (mg.recent && mg.recent.length) {
-      $('mongoTbody').innerHTML = mg.recent.map(r => `
-        <tr>
-          <td class="id-c">${r.id ?? '—'}</td>
-          <td>${r.name ?? '—'}</td>
-          <td class="email-c">${r.email ?? '—'}</td>
-          <td style="color:var(--dim)">${r.phone ?? '—'}</td>
-        </tr>`).join('');
-    }
-    $('mongoTs').textContent = ts;
-
     // Redis state
+    const ts = new Date().toLocaleTimeString('vi-VN');
     if (rd.ok) {
       setTxt('rCust',  rd.customers_total);
       setTxt('rOrd',   rd.orders_total);
@@ -679,6 +716,32 @@ async function refresh() {
       } else {
         $('ordersTbody').innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--dim);padding:14px 0">No orders yet — start the demo to inject data</td></tr>';
       }
+    }
+
+    // Comparison table
+    if (cmp && cmp.ok && cmp.mysql && cmp.mysql.length) {
+      const mByID = cmp.mongo_by_id || {};
+      $('cmpMysqlBody').innerHTML = cmp.mysql.map(r => `
+        <tr>
+          <td class="id-c">${r.id}</td>
+          <td>${r.name ?? '—'}</td>
+          <td class="raw-email">${r.email ?? '—'}</td>
+          <td>${r.phone ?? '—'}</td>
+          <td style="font-size:10px;color:var(--dim)">${r.created_at ?? '—'}</td>
+        </tr>`).join('');
+
+      $('cmpMongoBody').innerHTML = cmp.mysql.map(r => {
+        const md = mByID[r.id];
+        const sync = md ? '' : ' <span style="color:var(--dim);font-size:10px">⏳</span>';
+        return `<tr>
+          <td class="id-c">${r.id}${sync}</td>
+          <td>${md ? (md.name ?? '—') : '<span style="color:var(--dim)">⏳</span>'}</td>
+          <td class="${md ? 'masked-email' : ''}">${md ? (md.email ?? '—') : '<span style="color:var(--dim)">⏳</span>'}</td>
+          <td><span class="field-dropped">${r.phone ?? '—'}</span></td>
+          <td><span class="field-dropped" style="font-size:10px">${r.created_at ?? '—'}</span></td>
+        </tr>`;
+      }).join('');
+      $('cmpTs').textContent = new Date().toLocaleTimeString('vi-VN');
     }
 
     // Footer

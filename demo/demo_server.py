@@ -51,6 +51,9 @@ _state = {
 }
 _lock = threading.Lock()
 
+# Base offsets recorded at clear time — dashboard shows relative values
+_kafka_base = {"customers": 0.0, "orders": 0.0}
+
 _NAMES = [
     "Nguyễn Văn An", "Trần Thị Bích", "Lê Hoàng Cường", "Phạm Thị Dung",
     "Hoàng Văn Em",  "Đặng Thị Fương","Bùi Văn Giang",  "Đỗ Thị Hoa",
@@ -236,6 +239,93 @@ def api_orders():
     except Exception as e:
         return jsonify({"ok": False, "count": 0, "recent": [], "error": str(e)})
 
+@app.route("/api/clear", methods=["POST"])
+def api_clear():
+    errors = []
+    try:
+        conn = pymysql.connect(
+            host=MYSQL_HOST, port=MYSQL_PORT,
+            user=MYSQL_USER, password=MYSQL_PASS, db=MYSQL_DB,
+            autocommit=True, charset="utf8mb4",
+        )
+        cur = conn.cursor()
+        cur.execute("SET FOREIGN_KEY_CHECKS=0")
+        cur.execute("TRUNCATE TABLE orders")
+        cur.execute("TRUNCATE TABLE customers")
+        cur.execute("SET FOREIGN_KEY_CHECKS=1")
+        conn.close()
+    except Exception as e:
+        errors.append(f"mysql: {e}")
+
+    try:
+        client = pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000)
+        db = client["inventory"]
+        db["customers"].delete_many({})
+        db["orders"].delete_many({})
+    except Exception as e:
+        errors.append(f"mongo: {e}")
+
+    try:
+        r = redis_lib.Redis(host=REDIS_HOST, port=REDIS_PORT, socket_timeout=2)
+        r.flushdb()
+    except Exception as e:
+        errors.append(f"redis: {e}")
+
+    # Snapshot current Kafka end-offsets as new base so dashboard shows 0 after clear.
+    # Actual Kafka offset (in Prometheus) is unchanged — preserves fault-tolerance story.
+    global _kafka_base
+    for metric, key in [("cdc_kafka_customers_offset", "customers"),
+                        ("cdc_kafka_orders_offset",    "orders")]:
+        try:
+            url = f"{PROM_URL}/api/v1/query?query={metric}"
+            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                data = json.loads(resp.read())
+            rs = data.get("data", {}).get("result", [])
+            _kafka_base[key] = float(rs[0]["value"][1]) if rs else 0.0
+        except Exception:
+            pass
+
+    return jsonify({"ok": len(errors) == 0, "errors": errors})
+
+@app.route("/api/comparison")
+def api_comparison():
+    try:
+        conn = pymysql.connect(
+            host=MYSQL_HOST, port=MYSQL_PORT,
+            user=MYSQL_USER, password=MYSQL_PASS, db=MYSQL_DB,
+            autocommit=True, charset="utf8mb4",
+        )
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, name, email, phone, created_at "
+            "FROM customers ORDER BY id DESC LIMIT 8"
+        )
+        rows = cur.fetchall()
+        conn.close()
+
+        mysql_records = [
+            {"id": r[0], "name": r[1], "email": r[2], "phone": r[3],
+             "created_at": r[4].strftime("%Y-%m-%d %H:%M") if r[4] else None}
+            for r in rows
+        ]
+        ids = [r[0] for r in rows]
+
+        client = pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000)
+        db = client["inventory"]
+        mongo_by_id = {}
+        for mid in ids:
+            doc = db["customers"].find_one({"_id": mid}, {"_id": 1, "name": 1, "email": 1})
+            if doc is None:
+                doc = db["customers"].find_one({"_id": int(mid)}, {"_id": 1, "name": 1, "email": 1})
+            if doc:
+                mongo_by_id[mid] = {"id": doc["_id"], "name": doc.get("name"), "email": doc.get("email")}
+
+        return jsonify({"ok": True, "mysql": mysql_records, "mongo_by_id": mongo_by_id})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "mysql": [], "mongo": []})
+
+
 def _detect_engine() -> str:
     for url in [f"http://{os.getenv('SPARK_MASTER_HOST', 'localhost')}:8080/json/",
                 "http://localhost:8080/json/"]:
@@ -281,6 +371,11 @@ def api_metrics():
             result[m] = float(rs[0]["value"][1]) if rs else 0.0
         except Exception:
             result[m] = None
+
+    # Return relative offsets (0 after clear) while Prometheus keeps absolute values
+    if result.get("cdc_kafka_customers_offset") is not None:
+        result["cdc_kafka_customers_offset"] = max(0.0, result["cdc_kafka_customers_offset"] - _kafka_base["customers"])
+
     return jsonify(result)
 
 
