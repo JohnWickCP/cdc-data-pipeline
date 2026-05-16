@@ -111,19 +111,22 @@ Counter chỉ tăng khi `op = c` (INSERT) hoặc `op = r` (snapshot read), giả
 
 ---
 
-## 4. `cdc_spark_batch_duration_ms` luôn = 0
+## 4. `cdc_spark_batch_duration_ms` — đã hoạt động đúng (cập nhật 2026-05-17)
 
-### Lý do
+### Cơ chế hiện tại
 
-Metric này là **placeholder** — không đo được từ bên ngoài Spark mà không có Spark REST API hoặc `StreamingQueryListener` bên trong job.
+Metric được đo qua chuỗi: **Scala `StreamingQueryListener` → Redis → metrics exporter → Prometheus**.
 
-Metrics exporter là một Python process riêng ngoài Spark, không có cách nào đọc batch duration thật qua HTTP.
+Cụ thể: `StreamingQueryListener.onQueryProgress` trong `cdc_redis_consumer.scala` đọc `triggerExecution` từ `event.progress.durationMs` sau mỗi micro-batch có data, rồi ghi vào Redis key `spark:batch_duration_ms`. Exporter đọc key này mỗi 5 giây.
 
-### Hậu quả
+### Khi nào metric = 0
 
-Benchmark in ra `Spark batch: avg 0ms, p95 0ms` — con số này vô nghĩa, không phải Spark đang xử lý 0ms/batch.
+- Ngay sau `stop.sh -v` + fresh start: key chưa được ghi lần nào → = 0 cho đến batch đầu tiên có data (vài giây).
+- Khi chạy Python mode (`--python`): Python job chưa implement listener này → = 0 mãi.
 
-Để fix đúng cần implement `StreamingQueryListener` trong Scala job và expose ra qua một endpoint (xem TASKS.md 2C.1).
+### Giá trị thực tế
+
+Khi pipeline đang xử lý tải bình thường (Scala mode): ~1000–7000ms tùy throughput.
 
 ---
 
@@ -202,9 +205,11 @@ alive = data["aliveworkers"]
 ### Không đo được / không chính xác
 
 - **Latency per-record**: chỉ đo aggregate, không có timestamp per-message
-- **Spark batch duration**: luôn = 0 (placeholder, xem mục 4)
-- **RAM/CPU của Spark executors**: lấy từ metric không tồn tại, luôn = 0
 - **Throughput dưới concurrent load**: benchmark inject single-threaded
+
+*Đã fix so với phiên bản cũ:*
+- ~~Spark batch duration = 0~~ → ✅ `StreamingQueryListener` → Redis → exporter (Scala mode, từ 2026-05-07)
+- ~~RAM/CPU Spark executors = 0~~ → ✅ `collect_spark()` query Spark Master REST API (từ 2026-05-07)
 
 ### Lưu ý khi so sánh với benchmark công ty khác
 
@@ -266,11 +271,17 @@ Latency thực tế ≈ **Spark trigger interval** = 5s (worst case):
 - Nhỏ hơn trigger interval (5000ms) → tốt (pipeline không bị trễ)
 - Bằng hoặc lớn hơn 5000ms → cảnh báo (Grafana alert kích hoạt)
 
-### Kafka lag (đo được qua offset)
+### Kafka lag (đo được — hai loại)
 
-`cdc_lag_total` = số messages trong Kafka chưa được Spark consume.
-- Lag = 0: pipeline theo kịp real-time
-- Lag tăng: Spark xử lý chậm hơn MySQL insert → backlog đang tích lũy
+**`cdc_lag_total`** = `mysql_customers_count - mongo_customers_count`
+- Đo sync gap giữa MySQL và MongoDB (không phải Kafka consumer lag)
+- = 0 khi idle, tăng khi MySQL có records chưa đến MongoDB
+- Luôn = 0 ở trạng thái nghỉ (đây là đúng, không phải bug)
+
+**`cdc_kafka_consumer_lag`** (thêm từ 2026-05-17) = delta Kafka events - delta MongoDB writes trong mỗi polling window 5s
+- Đo backpressure real-time: Kafka nhận nhanh hơn Spark xử lý
+- = 0 khi idle, spike khi có load cao, về 0 khi Spark bắt kịp
+- Đây là proxy (Spark dùng checkpoint, không có consumer group chuẩn)
 
 ---
 

@@ -91,6 +91,8 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 | 4.4 | Fix Python fallback: `customers:total` sai khi DELETE | High | ✅ | `cdc_pipeline.py`: chuyển `pipe.incr` vào trong else block + gate op=c\|r, thêm `pipe.decr` khi op=d. Mirror đúng logic Scala JAR. |
 | 4.5 | start.sh Kafka topics timeout → warn thay vì exit 1 | Medium | ✅ | `start.sh`: đổi `exit 1` thành `warn + break` để startup không fail khi Debezium tạo topics chậm. |
 | 4.6 | metrics_exporter.py: bỏ MySQL connection thứ 2 trong check_pipeline_health | Low | ✅ | `metrics_exporter.py`: `collect_mysql()` trả về tuple (ok, c_count, o_count), truyền vào `check_pipeline_health()` thay vì mở lại connection. |
+| 4.7 | start.sh: skip `docker compose up -d` khi partial containers đang chạy | High | ✅ | Khi bất kỳ container nào up, script chỉ restart Spark và bỏ qua cold-start → MySQL/Kafka/Debezium không được start. Fix: luôn chạy `docker compose up -d` trước khi restart Spark. |
+| 4.8 | Thêm `cdc_kafka_consumer_lag` metric (delta-based backpressure) | Medium | ✅ | `metrics_exporter.py`: delta Kafka events - delta MongoDB writes mỗi 5s window. Thay thế cho cumulative approach (sai vì offset tích lũy mãi từ benchmark runs). |
 
 **Không fix (intentional):** Kafka multi-broker — thêm 2 broker nữa tốn quá nhiều RAM (không đủ trên laptop 16GB). Đây là known limitation đã document ở README section 8.2.
 
@@ -144,3 +146,4 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 | 2026-05-16 | Phase 4.1+4.2: thêm spark_checkpoint volume (driver recovery) + Redis AOF persistence vào docker-compose.yml |
 | 2026-05-16 | Demo fixes: api_comparison trả mysql_count trực tiếp, index.html dùng mysql_count thay Prometheus để tránh scrape lag |
 | 2026-05-17 | Error handling review + fixes: Python fallback customers:total bug (4.4), start.sh Kafka timeout (4.5), metrics_exporter double MySQL connection (4.6) |
+| 2026-05-17 | Fix startup bug: partial containers → start.sh bỏ qua `docker compose up -d` (4.7). Thêm `cdc_kafka_consumer_lag` delta-based metric (4.8). |

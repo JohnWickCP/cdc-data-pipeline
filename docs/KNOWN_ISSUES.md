@@ -24,7 +24,7 @@ Tài liệu theo dõi các vấn đề đã biết, trạng thái xử lý, và 
 | 3 | Idempotent upsert (không duplicate khi event đến nhiều lần) | ✅ | MongoDB dùng `replaceOne + upsert`, Redis dùng `SET` |
 | 4 | Spark checkpoint (không mất data khi restart) | ✅ | Checkpoint lưu tại `/tmp/spark-checkpoint/cdc-pipeline` trong container |
 | 5 | Auto-fix Kafka Cluster ID conflict khi restart | ✅ | `start.sh` tự detect và xóa volume Kafka/Zookeeper |
-| 6 | Monitoring Prometheus + Grafana | ⚠️ | Hoạt động, nhưng dashboard chưa đầy đủ (xem mục 3) |
+| 6 | Monitoring Prometheus + Grafana | ✅ | Dashboard đầy đủ: real-time rates, Spark batch duration, Kafka lag, Grafana alerts |
 | 7 | Benchmark E2E TPS | ⚠️ | Số liệu tổng thể OK, nhưng một số metrics phụ = 0 (xem mục 2) |
 | 8 | Demo INSERT / UPDATE / DELETE CDC | ✅ | Script `demo.sh` và `docs/DEMO_SCRIPT.md` |
 
@@ -32,15 +32,17 @@ Tài liệu theo dõi các vấn đề đã biết, trạng thái xử lý, và 
 
 ## Phần 2 — Vấn đề đo lường Benchmark
 
-### ❌ Spark batch duration luôn = 0ms
+### ✅ Spark batch duration — đã fix (2026-05-17)
 
-**Mô tả:** Benchmark script (`run_benchmark_v4.py`) đọc metric `cdc_spark_batch_duration_ms` từ `metrics_exporter`, nhưng exporter **không có khả năng** lấy được thời gian xử lý từng batch của Spark Structured Streaming từ bên ngoài. Metric này hiện tại là placeholder = 0.
+**Mô tả cũ (không còn đúng):** Metric là placeholder = 0.
 
-**Hệ quả:** Cột "Spark batch: avg 0ms, p95 0ms" trong output benchmark luôn là 0, không phản ánh thực tế.
+**Thực tế hiện tại:** `StreamingQueryListener` đã được implement trong Scala job (`cdc_redis_consumer.scala`). Mỗi khi Spark hoàn thành một micro-batch có data, listener ghi `triggerExecution` ms vào Redis key `spark:batch_duration_ms`. Metrics exporter đọc key này và expose ra Prometheus. Grafana và benchmark script đều nhận đúng giá trị (test thực tế: ~6769ms khi pipeline đang chạy tải).
 
-**Cách fix đúng:** Cần expose Spark metrics ra ngoài thông qua Spark REST API (`/api/v1/applications/{id}/streaming/statistics`) hoặc dùng Spark `StreamingQueryListener` để ghi ra file rồi exporter đọc. Khá phức tạp, chưa làm.
+**Edge case còn lại:**
+- Sau `stop.sh -v` + fresh start: metric = 0 cho đến khi batch đầu tiên có data xử lý xong (~vài giây).
+- Chạy Python mode (`--python`): metric = 0 mãi vì Python job chưa implement listener này.
 
-**Ảnh hưởng đến kết quả tổng thể:** Thấp — E2E TPS vẫn đo đúng vì không phụ thuộc vào metric này.
+**Ảnh hưởng đến kết quả tổng thể:** Không còn ảnh hưởng khi dùng Scala mode.
 
 ---
 
@@ -89,24 +91,15 @@ Tài liệu theo dõi các vấn đề đã biết, trạng thái xử lý, và 
 
 ## Phần 3 — Dashboard Grafana
 
-### ❌ Không có panel real-time TPS
+### ✅ Panel real-time — đã có (Phase 3.1, 2026-05-07)
 
-**Mô tả:** Dashboard hiện tại chỉ hiển thị số lượng records (MySQL count, Mongo count, Redis keys) và Kafka offset. Không có panel nào hiển thị TPS theo thời gian thực trong khi benchmark đang chạy.
-
-**Metrics cần thiết đã có từ Phase 1 fix:** `cdc_mysql_insert_rate`, `cdc_kafka_rate_total`, `cdc_mongo_write_rate`, `cdc_lag_total` — đã được thêm vào exporter.
-
-**Việc còn lại:** Tạo panel Grafana dùng các metrics trên. Dự kiến làm ở Phase 3.
+Row "Real-time Metrics" trong `cdc_fixed1.json` gồm: timeseries insert rate, Kafka rate, MongoDB write rate, lag, Spark batch duration ms, executor cores/memory. Metrics: `cdc_mysql_insert_rate`, `cdc_kafka_rate_total`, `cdc_mongo_write_rate`, `cdc_lag_total`, `cdc_kafka_consumer_lag`.
 
 ---
 
-### ⚠️ Grafana datasource UID đôi khi không khớp
+### ✅ Grafana datasource UID — đã tự động fix
 
-**Mô tả:** Sau khi xóa volume và khởi động lại (`stop.sh -v` rồi `start.sh`), Grafana generate UID mới cho datasource Prometheus, nhưng dashboard JSON còn tham chiếu UID cũ → panel hiển thị "No data".
-
-**Workaround:** `start.sh` có đoạn auto-patch UID, nhưng đoạn này hiện đang trống (chưa implement xong). Nếu bị lỗi, restart Grafana:
-```bash
-cd pipeline && docker compose restart grafana
-```
+`start.sh` bước 9 restart Grafana sau khi healthy để force reload provisioning. Sau `stop.sh -v` + `start.sh` dashboard load lại đúng UID. Nếu vẫn lỗi: `docker compose restart grafana`.
 
 ---
 
@@ -142,8 +135,8 @@ cd pipeline && docker compose restart grafana
 | 4 | TLS / authentication cho Kafka | Hiện tại plain text, phù hợp cho môi trường dev/test |
 | 5 | DELETE event CDC — Redis chưa xóa key | Debezium capture đúng, Scala job có xử lý DELETE, nhưng Redis không xóa key |
 | 6 | Multi-table CDC ngoài `customers` và `orders` | Hiện tại chỉ test 2 bảng |
-| 7 | Grafana alert khi lag > ngưỡng | Chưa cấu hình |
-| 8 | Spark batch duration metric thật | Kế hoạch: shared volume + `StreamingQueryListener` ghi JSON ra file |
+| 7 | Grafana alert khi lag > ngưỡng | ✅ `monitoring/grafana/provisioning/alerting/cdc_alerts.yml` — lag≥100(warn), lag≥500(critical), batch≥5000ms(warn) |
+| 8 | ✅ Spark batch duration metric thật | Đã fix 2026-05-17: `StreamingQueryListener` → Redis → exporter (Scala mode) |
 | 9 | Benchmark với mix INSERT/UPDATE/DELETE thực tế | Hiện chỉ đo thuần INSERT customers |
 | 10 | Benchmark với transaction nhiều rows (batch write) | Use case hẹp: hiện 1 "records/s" = 1 row |
 | 11 | So sánh Scala vs Python bằng cách đo đúng | Cần đồng trigger interval: Python 10s → 5s trước |
@@ -158,62 +151,25 @@ cd pipeline && docker compose restart grafana
 
 ## Phần 6 — Scale tài nguyên theo phần cứng
 
-### ⚠️ Không có cơ chế cấu hình tài nguyên linh hoạt
+### ✅ Đã implement — hardware profiles + override flags (2026-05-06/07)
 
-**Hiện trạng:**
-Docker Compose hiện tại **không có resource limits** và **không có biến môi trường** để tinh chỉnh Spark/Kafka theo hardware. Cụ thể:
-- Không có `SPARK_WORKER_CORES`, `SPARK_WORKER_MEMORY`
-- Số worker cứng = 3, không dễ thay đổi
-- Kafka không có heap size setting
-- Không có profile riêng cho laptop vs server vs VM
+`.env.laptop` / `.env.server` / `.env.vm` tại root — `start.sh` auto-detect và copy sang `.env` trước khi compose up.
 
-**Hệ quả:** Khi chuyển sang phần cứng mạnh hơn (nhiều core, RAM nhiều), phải tự tìm và sửa nhiều chỗ trong `docker-compose.yml` theo tay. Dễ sai và không reproducible.
-
----
-
-**Kế hoạch fix — file `pipeline/.env` làm trung tâm cấu hình:**
-
-Tạo file `pipeline/.env` (docker-compose tự đọc):
-```env
-# ── Spark Workers ─────────────────────────────────────
-SPARK_WORKER_COUNT=3           # Số worker containers
-SPARK_WORKER_CORES=4           # Core CPU mỗi worker
-SPARK_WORKER_MEMORY=2g         # RAM mỗi worker
-
-# ── Kafka ─────────────────────────────────────────────
-KAFKA_HEAP_OPTS=-Xmx1g         # JVM heap Kafka broker
-KAFKA_DEFAULT_PARTITIONS=1     # Partitions cho CDC topics
-
-# ── Debezium Connect ──────────────────────────────────
-CONNECT_HEAP=-Xmx512m
-```
-
-Rồi `docker-compose.yml` tham chiếu:
-```yaml
-environment:
-  SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-4}
-  SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-2g}
-```
-
----
-
-**Kế hoạch — profile theo môi trường:**
-
-```
-pipeline/
-  .env                    # Active profile (copy từ một trong các file dưới)
-  .env.laptop             # i5-11400H, 16GB RAM, Docker 8 cores
-  .env.server             # 16+ cores, 32GB+, nhiều workers
-  .env.vm                 # Cloud VM (DigitalOcean c-16...)
-```
-
-Khi switch phần cứng:
 ```bash
-cp pipeline/.env.server pipeline/.env
-bash stop.sh && bash start.sh
+bash start.sh                        # auto-detect profile
+bash start.sh --profile=server       # chỉ định rõ
+bash start.sh --partitions=3 --spark-memory=4g  # override thông số
 ```
 
-**Ghi chú thêm về Kafka partition:** Khi tăng Kafka partition (>1), Spark có thể xử lý song song nhiều partition cùng lúc. Muốn có hiệu quả thật sự cần đảm bảo `SPARK_WORKER_COUNT >= KAFKA_DEFAULT_PARTITIONS`.
+Biến môi trường trong `.env`:
+```env
+SPARK_WORKER_CORES=4
+SPARK_WORKER_MEMORY=2g
+KAFKA_HEAP_OPTS=-Xmx1g -Xms512m
+KAFKA_NUM_PARTITIONS=1
+```
+
+**Ghi chú về Kafka partition:** Khi tăng partition >1, Spark xử lý song song được nhiều partition. Cần `SPARK_WORKER_COUNT >= KAFKA_NUM_PARTITIONS` để có hiệu quả thật.
 
 ---
 
@@ -222,4 +178,9 @@ bash stop.sh && bash start.sh
 | Ngày | Thay đổi |
 |---|---|
 | 2026-04-19 | Hoàn thành pipeline cơ bản, benchmark E2E lần đầu |
-| 2026-05-06 | Fix `start.sh` Windows compatibility, thêm rate metrics vào exporter, viết lại docs, pin requirements.txt, tạo .env.example, ghi nhận vấn đề thuật ngữ TPS, cơ chế scale tài nguyên |
+| 2026-05-06 | Fix `start.sh` Windows compatibility, thêm rate metrics vào exporter, viết lại docs, pin requirements.txt, tạo .env.example, ghi nhận vấn đề thuật ngữ TPS |
+| 2026-05-06 | Implement hardware profiles (.env.laptop/.env.server/.env.vm), start.sh auto-detect, override flags |
+| 2026-05-07 | Phase 2B/2C: Redis counter fix, Grafana restart auto-patch, Spark executor metrics, StreamingQueryListener |
+| 2026-05-07 | Phase 3: Grafana real-time panels, demo dashboard, benchmark history/compare, Grafana alert rules |
+| 2026-05-16 | Phase 4: Spark checkpoint volume, Redis AOF persistence, fault tolerance demo |
+| 2026-05-17 | Fix startup bug (partial containers skip `docker compose up -d`), thêm `cdc_kafka_consumer_lag` metric (delta-based) |
