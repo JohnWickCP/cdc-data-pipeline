@@ -1,0 +1,1309 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CDC Pipeline — So sánh với Production Systems thực tế</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d27;
+    --border: #2d3148;
+    --text: #e2e8f0;
+    --muted: #8892a4;
+    --accent: #6366f1;
+    --green: #22c55e;
+    --yellow: #eab308;
+    --red: #ef4444;
+    --blue: #3b82f6;
+    --cyan: #06b6d4;
+    --orange: #f97316;
+    --purple: #a855f7;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; line-height: 1.6; }
+  a { color: var(--cyan); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .page { max-width: 1400px; margin: 0 auto; padding: 24px 20px; }
+
+  /* Header */
+  .header { text-align: center; padding: 32px 0 24px; border-bottom: 1px solid var(--border); margin-bottom: 32px; }
+  .header h1 { font-size: 28px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+  .header .subtitle { color: var(--muted); font-size: 15px; }
+  .header .date { color: var(--accent); font-size: 13px; margin-top: 6px; }
+
+  /* My System Banner */
+  .my-system { background: linear-gradient(135deg, #1e1b4b 0%, #1a1d27 100%); border: 1px solid var(--accent); border-radius: 12px; padding: 20px 24px; margin-bottom: 32px; }
+  .my-system h2 { color: var(--accent); font-size: 16px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .system-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .sys-item { background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.3); border-radius: 8px; padding: 12px; }
+  .sys-item .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .sys-item .value { color: var(--text); font-size: 16px; font-weight: 600; }
+  .sys-item .note { color: var(--muted); font-size: 11px; margin-top: 2px; }
+
+  /* Section */
+  section { margin-bottom: 40px; }
+  .section-title { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid var(--border); display: flex; align-items: center; gap: 10px; }
+  .section-title .tag { background: var(--accent); color: white; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 500; }
+
+  /* Table */
+  .table-wrap { overflow-x: auto; border-radius: 10px; border: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #1e2236; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 14px; text-align: left; white-space: nowrap; }
+  td { padding: 10px 14px; border-top: 1px solid var(--border); vertical-align: top; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  .highlight-row td { background: rgba(99,102,241,0.08); border-left: 3px solid var(--accent); }
+  .num { font-weight: 600; font-family: monospace; }
+  .big-num { color: var(--orange); font-size: 15px; }
+  .med-num { color: var(--yellow); }
+  .my-num { color: var(--accent); font-size: 15px; font-weight: 700; }
+  .chip { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 500; }
+  .chip-green { background: rgba(34,197,94,0.15); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+  .chip-yellow { background: rgba(234,179,8,0.15); color: var(--yellow); border: 1px solid rgba(234,179,8,0.3); }
+  .chip-red { background: rgba(239,68,68,0.15); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+  .chip-blue { background: rgba(59,130,246,0.15); color: var(--blue); border: 1px solid rgba(59,130,246,0.3); }
+  .chip-purple { background: rgba(168,85,247,0.15); color: var(--purple); border: 1px solid rgba(168,85,247,0.3); }
+  .chip-gray { background: rgba(136,146,164,0.15); color: var(--muted); border: 1px solid rgba(136,146,164,0.3); }
+
+  /* Bar chart */
+  .bar-section { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+  .bar-label { font-size: 12px; color: var(--muted); margin-bottom: 16px; }
+  .bar-row { display: flex; align-items: center; margin-bottom: 10px; gap: 10px; }
+  .bar-name { width: 220px; font-size: 12px; color: var(--text); flex-shrink: 0; text-align: right; }
+  .bar-track { flex: 1; background: rgba(255,255,255,0.05); border-radius: 3px; height: 18px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s; display: flex; align-items: center; justify-content: flex-end; padding-right: 6px; }
+  .bar-fill .val { font-size: 10px; font-weight: 600; color: white; white-space: nowrap; }
+  .bar-mine { background: linear-gradient(90deg, #4f46e5, #6366f1); }
+  .bar-green { background: linear-gradient(90deg, #15803d, #22c55e); }
+  .bar-yellow { background: linear-gradient(90deg, #a16207, #eab308); }
+  .bar-orange { background: linear-gradient(90deg, #c2410c, #f97316); }
+  .bar-red { background: linear-gradient(90deg, #991b1b, #ef4444); }
+  .bar-blue { background: linear-gradient(90deg, #1d4ed8, #3b82f6); }
+
+  /* Cards */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .card-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+  .card-title { font-size: 14px; font-weight: 600; color: var(--text); }
+  .card-region { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .card-stat { text-align: right; }
+  .card-stat .main { font-size: 18px; font-weight: 700; color: var(--orange); }
+  .card-stat .unit { font-size: 11px; color: var(--muted); }
+  .card-body { color: var(--muted); font-size: 12px; line-height: 1.7; }
+  .card-body strong { color: var(--text); }
+  .card-link { margin-top: 10px; font-size: 11px; }
+  .card-divider { border-top: 1px solid var(--border); margin: 10px 0; }
+
+  /* Context box */
+  .context-box { background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--yellow); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .context-box .title { color: var(--yellow); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .context-box p, .context-box li { color: var(--muted); font-size: 13px; line-height: 1.7; }
+  .context-box ul { padding-left: 16px; }
+  .context-box strong { color: var(--text); }
+
+  /* Footer */
+  .footer { text-align: center; padding: 24px 0; color: var(--muted); font-size: 12px; border-top: 1px solid var(--border); margin-top: 40px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- Header -->
+<div class="header">
+  <h1>CDC Data Pipeline — So sánh với Production Systems thực tế</h1>
+  <div class="subtitle">Đồ án tốt nghiệp — So sánh thông số, kiến trúc và bối cảnh với các hệ thống thực tế trên thế giới</div>
+  <div class="date">Ngày tổng hợp: tháng 5/2026 · Dữ liệu có nguồn trích dẫn đầy đủ</div>
+</div>
+
+<!-- My System -->
+<div class="my-system">
+  <h2>⚡ Hệ thống của tôi (đồ án tốt nghiệp)</h2>
+  <div class="system-grid">
+    <div class="sys-item">
+      <div class="label">Hardware</div>
+      <div class="value">Intel Core i5-11th Gen</div>
+      <div class="note">12 logical cores, ~32GB RAM — laptop cá nhân</div>
+    </div>
+    <div class="sys-item">
+      <div class="label">Peak Throughput</div>
+      <div class="value">370 records/s</div>
+      <div class="note">Scala Spark, single-node, localhost Docker</div>
+    </div>
+    <div class="sys-item">
+      <div class="label">Sustained Throughput</div>
+      <div class="value">~250 records/s</div>
+      <div class="note">Scala engine, sustained load</div>
+    </div>
+    <div class="sys-item">
+      <div class="label">Latency (E2E)</div>
+      <div class="value">~2–5 giây</div>
+      <div class="note">Spark trigger 5s micro-batch</div>
+    </div>
+    <div class="sys-item">
+      <div class="label">Stack</div>
+      <div class="value">MySQL → Debezium → Kafka → Spark → MongoDB + Redis</div>
+      <div class="note">12 Docker containers trên localhost</div>
+    </div>
+    <div class="sys-item">
+      <div class="label">Loại setup</div>
+      <div class="value">Single-node localhost</div>
+      <div class="note">Không có network latency thật, không replication</div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SECTION 0: METRIC GLOSSARY ==================== -->
+<section>
+  <div class="section-title">
+    📖 Giải thích đơn vị đo — Đọc trước khi xem số liệu
+  </div>
+
+  <div class="context-box" style="border-left-color:#06b6d4;margin-bottom:16px;">
+    <div class="title" style="color:#06b6d4;">Vì sao cần phân biệt? Cùng 1 "giao dịch" tạo ra nhiều con số khác nhau</div>
+    <p>Khi 1 khách hàng <strong>đặt 1 đơn hàng</strong>, hệ thống ghi nhận nhiều loại metric khác nhau ở mỗi tầng. Hiểu sai đơn vị → so sánh sai:</p>
+  </div>
+
+  <!-- Flow diagram -->
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px;overflow-x:auto;">
+    <div style="display:flex;align-items:center;gap:0;min-width:800px;font-size:12px;">
+      <div style="background:rgba(99,102,241,0.2);border:1px solid var(--accent);border-radius:8px;padding:10px 14px;text-align:center;min-width:110px;">
+        <div style="color:var(--accent);font-weight:600;">Khách hàng</div>
+        <div style="color:var(--muted);font-size:11px;">đặt 1 đơn hàng</div>
+      </div>
+      <div style="flex:1;height:2px;background:var(--border);position:relative;">
+        <div style="position:absolute;top:-9px;left:50%;transform:translateX(-50%);color:var(--muted);font-size:10px;white-space:nowrap;">~5–15 HTTP calls</div>
+      </div>
+      <div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.4);border-radius:8px;padding:10px 14px;text-align:center;min-width:120px;">
+        <div style="color:#ef4444;font-weight:600;">req/s tăng</div>
+        <div style="color:var(--muted);font-size:11px;">browse+cart+checkout+pay = 5–15 req</div>
+      </div>
+      <div style="flex:1;height:2px;background:var(--border);position:relative;">
+        <div style="position:absolute;top:-9px;left:50%;transform:translateX(-50%);color:var(--muted);font-size:10px;white-space:nowrap;">1 payment</div>
+      </div>
+      <div style="background:rgba(234,179,8,0.1);border:1px solid rgba(234,179,8,0.4);border-radius:8px;padding:10px 14px;text-align:center;min-width:120px;">
+        <div style="color:#eab308;font-weight:600;">TPS/orders/s</div>
+        <div style="color:var(--muted);font-size:11px;">1 business order = 1 payment TPS</div>
+      </div>
+      <div style="flex:1;height:2px;background:var(--border);position:relative;">
+        <div style="position:absolute;top:-9px;left:50%;transform:translateX(-50%);color:var(--muted);font-size:10px;white-space:nowrap;">~7–10 row changes</div>
+      </div>
+      <div style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.4);border-radius:8px;padding:10px 14px;text-align:center;min-width:120px;">
+        <div style="color:#22c55e;font-weight:600;">CDC events/s</div>
+        <div style="color:var(--muted);font-size:11px;">orders+items+inventory+payment rows</div>
+      </div>
+      <div style="flex:1;height:2px;background:var(--border);position:relative;">
+        <div style="position:absolute;top:-9px;left:50%;transform:translateX(-50%);color:var(--muted);font-size:10px;white-space:nowrap;">+reads</div>
+      </div>
+      <div style="background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.4);border-radius:8px;padding:10px 14px;text-align:center;min-width:110px;">
+        <div style="color:#3b82f6;font-weight:600;">QPS</div>
+        <div style="color:var(--muted);font-size:11px;">writes + reads = rất cao</div>
+      </div>
+    </div>
+    <div style="text-align:center;color:var(--muted);font-size:11px;margin-top:12px;">
+      Từ trái → phải: <strong>1 đơn hàng → 5–15 HTTP requests → 1 payment TPS → ~7–10 CDC events → nhiều QPS hơn</strong>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Đơn vị</th><th>Viết tắt</th><th>Ý nghĩa chính xác</th><th>Ai dùng</th><th>Quan hệ với 1 đơn hàng</th><th>Dùng trong báo cáo này</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong style="color:var(--green);">CDC events/s</strong></td>
+          <td><code>CDC/s</code></td>
+          <td>Số thay đổi cấp độ row (INSERT/UPDATE/DELETE) mà Debezium capture được mỗi giây từ MySQL binlog</td>
+          <td>Debezium, CDC pipelines</td>
+          <td><strong>~7–10 CDC events</strong> per order (orders+items+inventory+payment+customer tables)</td>
+          <td><span class="chip chip-green">Pipeline của tôi — đây là metric chính</span></td>
+        </tr>
+        <tr>
+          <td><strong style="color:var(--yellow);">Orders/s</strong></td>
+          <td><code>orders/s</code></td>
+          <td>Số đơn hàng khách hàng đặt thành công mỗi giây (business metric)</td>
+          <td>E-commerce platforms (Shopify, Flipkart, Otto, Meesho...)</td>
+          <td><strong>1 order = 1 đơn vị</strong> (nhưng tạo ra nhiều CDC events phía sau)</td>
+          <td><span class="chip chip-yellow">Shopify, Otto, Flipkart, Meesho — cần nhân ×7–10 để so với CDC/s</span></td>
+        </tr>
+        <tr>
+          <td><strong style="color:var(--yellow);">TPS</strong></td>
+          <td><code>TPS</code></td>
+          <td><em>Ambiguous!</em> (1) DB transaction (BEGIN...COMMIT, nhiều rows) — (2) Payment transaction (1 payment = 1 TPS) — (3) Đôi khi dùng lỏng lẻo như records/s</td>
+          <td>Visa/PayPal (payment TPS), MySQL benchmark (DB TPS)</td>
+          <td>Payment TPS: 1:1 với orders. DB TPS: có thể chứa nhiều rows.</td>
+          <td><span class="chip chip-yellow">Visa, PayPal — xem ngữ cảnh mỗi nguồn</span></td>
+        </tr>
+        <tr>
+          <td><strong style="color:var(--blue);">QPS</strong></td>
+          <td><code>QPS</code></td>
+          <td>Queries per second — số câu lệnh SQL (SELECT + INSERT + UPDATE + DELETE) mỗi giây. Cao hơn nhiều so với CDC vì bao gồm cả reads</td>
+          <td>MySQL, MongoDB, Redis benchmarks (Shopify "19M MySQL QPS")</td>
+          <td>1 order → hàng chục QPS (browse + validate + insert + index update...)</td>
+          <td><span class="chip chip-blue">Shopify MySQL QPS, Uber Docstore — không so được trực tiếp với CDC/s</span></td>
+        </tr>
+        <tr>
+          <td><strong style="color:var(--red);">req/s</strong></td>
+          <td><code>req/s</code></td>
+          <td>HTTP requests per second — số request đến web server/API gateway. Bao gồm tất cả: browse, search, add cart, checkout, not just orders</td>
+          <td>Load balancers, CDN (Shopify "967K req/s", Amazon CloudFront)</td>
+          <td>1 order ≈ 5–15 HTTP requests (browse→cart→checkout→payment→confirm)</td>
+          <td><span class="chip chip-red">Shopify edge req/s, AWS — rất cao, không so được với orders/s</span></td>
+        </tr>
+        <tr>
+          <td><strong style="color:var(--purple);">messages/s</strong></td>
+          <td><code>msg/s</code></td>
+          <td>Kafka messages per second — tương đương CDC events/s trong context CDC pipeline (1 CDC event = 1 Kafka message)</td>
+          <td>Kafka benchmarks, Yelp MySQLStreamer</td>
+          <td>~7–10 messages per order (nếu Kafka là CDC pipeline)</td>
+          <td><span class="chip chip-purple">Kafka benchmarks, Yelp — tương đương CDC/s</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ==================== SECTION 1: BAR CHART COMPARISON ==================== -->
+<section>
+  <div class="section-title">
+    📊 So sánh throughput trực quan
+    <span class="tag">Chú ý: log scale — xem bối cảnh bên dưới</span>
+  </div>
+
+  <div class="context-box" style="margin-bottom:16px;">
+    <div class="title">⚠️ Tại sao không thể so sánh thẳng các con số này</div>
+    <p>Các hệ thống dưới đây hoạt động trên phần cứng và môi trường <strong>hoàn toàn khác nhau</strong>. Con số cao hơn không có nghĩa "tốt hơn" trong mọi ngữ cảnh — xem bảng so sánh chi tiết bên dưới.</p>
+  </div>
+
+  <div class="bar-section">
+    <div class="bar-label">Peak throughput (CDC events/s hoặc orders/s) — so sánh nhiều hệ thống. Chú ý: cột màu tím = CDC events (technical), cột khác = orders (business). Xem Section "Hệ số nhân" để hiểu sự khác biệt.</div>
+
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;font-size:11px;color:var(--muted);">
+      <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;border-radius:2px;background:#6366f1;display:inline-block;"></span> Pipeline của tôi (CDC events/s)</span>
+      <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;border-radius:2px;background:#22c55e;display:inline-block;"></span> SMB/Regional (orders/s)</span>
+      <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;border-radius:2px;background:#3b82f6;display:inline-block;"></span> Large platform (orders/s hoặc events/s)</span>
+      <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;border-radius:2px;background:#f97316;display:inline-block;"></span> Enterprise CDC (events/s)</span>
+    </div>
+
+    <div class="bar-row">
+      <div class="bar-name">Yelp MySQLStreamer ban đầu</div>
+      <div class="bar-track"><div class="bar-fill bar-green" style="width:8%"><span class="val">&lt;100 CDC/s</span></div></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-name">European mid-size retailer (BF)</div>
+      <div class="bar-track"><div class="bar-fill bar-green" style="width:9%"><span class="val">11.4 orders/s → ~80-114 CDC/s</span></div></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-name">Debezium official benchmark (2026)</div>
+      <div class="bar-track"><div class="bar-fill" style="width:13%;background:linear-gradient(90deg,#7c3aed,#a855f7)"><span class="val">600 CDC/s</span></div></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-name" style="color:#6366f1;font-weight:600;">⭐ Pipeline của tôi (laptop)</div>
+      <div class="bar-track"><div class="bar-fill bar-mine" style="width:16%"><span class="val">370 CDC/s ≈ ~46 orders/s equiv.</span></div></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-name">Otto (🇩🇪 Đức, BF 2023)</div>
+      <div class="bar-track"><div class="bar-fill bar-green" style="width:14%"><span class="val">&gt;40 orders/s → ~280–400 CDC/s</span></div></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-name">Meesho (🇮🇳 India, Diwali 2023)</div>
+      <div class="bar-track"><div class="bar-fill bar-green" style="width:15%"><span class="val">72 orders/s → ~500–720 CDC/s</span></div></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-name">Zalando (🇩🇪 Đức, BF 2018)</div>
+      <div class="bar-track"><div class="bar-fill bar-green" style="width:17%"><span class="val">~70 orders/s → ~490–700 CDC/s</span></div></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-name">Flipkart (🇮🇳 India, BBD 2020)</div>
+      <div class="bar-track"><div class="bar-fill bar-blue" style="width:20%"><span class="val">110 orders/s → ~770–1,100 CDC/s</span></div></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-name">Yelp MySQLStreamer (sau 30x opt)</div>
+      <div class="bar-track"><div class="bar-fill" style="width:22%;background:linear-gradient(90deg,#7c3aed,#a855f7)"><span class="val">~3,000 CDC/s</span></div></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-name">Stripe (BFCM 2025, payment events)</div>
+      <div class="bar-track"><div class="bar-fill bar-blue" style="width:24%"><span class="val">2,533 txn/s</span></div></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-name">Traveloka Stream Pipeline</div>
+      <div class="bar-track"><div class="bar-fill bar-blue" style="width:30%"><span class="val">40–50K events/s</span></div></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-name">Gojek Kafka (avg)</div>
+      <div class="bar-track"><div class="bar-fill bar-blue" style="width:33%"><span class="val">~69K events/s</span></div></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-name">Shopify CDC (BFCM 2020 peak)</div>
+      <div class="bar-track"><div class="bar-fill bar-orange" style="width:38%"><span class="val">100K CDC/s</span></div></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-name">Uber Docstore CDC (per DC)</div>
+      <div class="bar-track"><div class="bar-fill bar-orange" style="width:42%"><span class="val">300K QPS/DC</span></div></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-name">Alibaba Double 11 (peak 2020)</div>
+      <div class="bar-track">
+        <div class="bar-fill bar-red" style="width:56%"><span class="val">583K orders/s</span></div>
+      </div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-name">Kafka benchmark (3 servers + 3 brokers)</div>
+      <div class="bar-track">
+        <div class="bar-fill bar-red" style="width:62%"><span class="val">2M records/s</span></div>
+      </div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-name">Amazon DynamoDB (Prime Day 2025)</div>
+      <div class="bar-track">
+        <div class="bar-fill bar-red" style="width:76%"><span class="val">151M req/s</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SECTION 2: CONTEXT TABLE ==================== -->
+<section>
+  <div class="section-title">
+    🏗️ So sánh chi tiết: Phần cứng, Stack và Use Case
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Hệ thống</th>
+          <th>Throughput (peak)</th>
+          <th>Phần cứng</th>
+          <th>CDC/Streaming Stack</th>
+          <th>Use Case</th>
+          <th>Loại Setup</th>
+          <th>Nguồn</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="highlight-row">
+          <td><strong style="color:#6366f1;">⭐ Pipeline của tôi</strong><br><span style="color:var(--muted);font-size:11px;">Đồ án tốt nghiệp (2026)</span></td>
+          <td><span class="my-num">370 rec/s peak<br>~250 rec/s sustained</span></td>
+          <td>i5-11th Gen, 12c, ~32GB<br><span style="color:var(--muted);font-size:11px;">Laptop cá nhân</span></td>
+          <td>MySQL → Debezium 2.5 → Kafka 7.5 → Spark 3.5 → MongoDB + Redis</td>
+          <td>Proof-of-concept CDC pipeline, monitoring, fault tolerance demo</td>
+          <td><span class="chip chip-blue">Single-node localhost</span><br><span style="font-size:11px;color:var(--muted);">12 Docker containers</span></td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td><strong>Shopify CDC</strong><br><span style="color:var(--muted);font-size:11px;">Canada, 2020–2024</span></td>
+          <td><span class="big-num">65K–100K rec/s</span><br><span style="color:var(--muted);font-size:11px;">peak BFCM</span></td>
+          <td>12 Kubernetes pods (production cloud)<br><span style="color:var(--muted);font-size:11px;">100+ MySQL shards, auto-scale</span></td>
+          <td>MySQL → Debezium (150 connectors, 1/shard) → Kafka (400TB) → Consumers</td>
+          <td>Replication mọi thay đổi DB tới data warehouse, fraud detection, analytics</td>
+          <td><span class="chip chip-red">Production distributed</span></td>
+          <td><a href="https://shopify.engineering/capturing-every-change-shopify-sharded-monolith" target="_blank">shopify.engineering (2021)</a></td>
+        </tr>
+        <tr>
+          <td><strong>Traveloka Streaming</strong><br><span style="color:var(--muted);font-size:11px;">Indonesia, 2019</span></td>
+          <td><span class="med-num">40K–50K events/s</span><br><span style="color:var(--muted);font-size:11px;">throttled by downstream</span></td>
+          <td>Google Cloud (GCP) — Dataflow auto-scale<br><span style="color:var(--muted);font-size:11px;">Không cần quản lý infra</span></td>
+          <td>Kafka → Cloud Pub/Sub → Google Cloud Dataflow → BigQuery</td>
+          <td>Fraud detection real-time, personalization, A/B testing, promotion eligibility</td>
+          <td><span class="chip chip-red">Production cloud</span></td>
+          <td><a href="https://cloud.google.com/blog/products/gcp/travelokas-journey-to-stream-analytics-on-google-cloud-platform" target="_blank">cloud.google.com (2019)</a></td>
+        </tr>
+        <tr>
+          <td><strong>Gojek Firehose</strong><br><span style="color:var(--muted);font-size:11px;">Indonesia, 2020</span></td>
+          <td><span class="med-num">~69K events/s avg</span><br><span style="color:var(--muted);font-size:11px;">6B events/day</span></td>
+          <td>Multi-region Kafka clusters (GCP + on-prem)<br><span style="color:var(--muted);font-size:11px;">&gt;10 TB/day</span></td>
+          <td>Kafka (600 topics→BigQuery, 700 topics→GCS) → BigQuery / Cloud Storage</td>
+          <td>Real-time analytics, operational monitoring, data lake ingestion</td>
+          <td><span class="chip chip-red">Production distributed</span></td>
+          <td><a href="https://cloud.google.com/blog/products/data-analytics/introducing-firehose-an-open-source-tool-from-gojek" target="_blank">cloud.google.com (2020)</a></td>
+        </tr>
+        <tr>
+          <td><strong>Grab Coban CDC</strong><br><span style="color:var(--muted);font-size:11px;">Singapore/SEA, 2023</span></td>
+          <td><span class="big-num">Hundreds TB/day</span><br><span style="color:var(--muted);font-size:11px;">~1.2 GB/s+</span></td>
+          <td>Kubernetes, multi-region (5,000+ streaming resources)<br><span style="color:var(--muted);font-size:11px;">Kafka Connect + Flink</span></td>
+          <td>Debezium MySQL connectors → Kafka Connect → Flink → Multiple sinks</td>
+          <td>Real-time order processing, GrabFood Elasticsearch sync, fraud detection</td>
+          <td><span class="chip chip-red">Production distributed</span></td>
+          <td><a href="https://engineering.grab.com/kafka-connect" target="_blank">engineering.grab.com (2023)</a></td>
+        </tr>
+        <tr>
+          <td><strong>Uber Flux/Docstore CDC</strong><br><span style="color:var(--muted);font-size:11px;">USA, 2021</span></td>
+          <td><span class="big-num">300K QPS/DC</span><br><span style="color:var(--muted);font-size:11px;">mỗi datacenter</span></td>
+          <td>Multi-datacenter (Schiphol, SJC, DFW)<br><span style="color:var(--muted);font-size:11px;">Thousands of MySQL tables</span></td>
+          <td>MySQL binlog tail → Kafka (Flux) → Materialized views / Data Lake</td>
+          <td>Replication cross-DC, materialized views, data lake ingestion, analytics</td>
+          <td><span class="chip chip-red">Production distributed</span></td>
+          <td><a href="https://ar5iv.labs.arxiv.org/html/2104.00087" target="_blank">SIGMOD 2021 (arXiv)</a></td>
+        </tr>
+        <tr>
+          <td><strong>LinkedIn Brooklin</strong><br><span style="color:var(--muted);font-size:11px;">USA, 2019–nay</span></td>
+          <td><span class="big-num">38B msg/day CDC</span><br><span style="color:var(--muted);font-size:11px;">2T msg/day mirror</span></td>
+          <td>On-prem + Azure (LinkedIn)<br><span style="color:var(--muted);font-size:11px;">2,000+ datastreams, 1,000+ sources</span></td>
+          <td>DB (Oracle/MySQL/Espresso) → Brooklin (tự xây) → Kafka → 200+ applications</td>
+          <td>Real-time feed updates, search index sync, analytics, cross-region replication</td>
+          <td><span class="chip chip-red">Production distributed</span></td>
+          <td><a href="https://engineering.linkedin.com/blog/2019/brooklin-open-source" target="_blank">engineering.linkedin.com (2019)</a></td>
+        </tr>
+        <tr>
+          <td><strong>Netflix DBLog + Delta</strong><br><span style="color:var(--muted);font-size:11px;">USA, 2020–2021</span></td>
+          <td><span class="big-num">Billions events/day</span><br><span style="color:var(--muted);font-size:11px;">từ nhiều DBs</span></td>
+          <td>AWS multi-region (full cloud-native)<br><span style="color:var(--muted);font-size:11px;">MySQL, PostgreSQL, CockroachDB, Cassandra</span></td>
+          <td>DB CDC → Kafka → Flink (Delta) → Elasticsearch / Cassandra / S3</td>
+          <td>Search index sync, data enrichment, cross-service data consistency, ML features</td>
+          <td><span class="chip chip-red">Production distributed</span></td>
+          <td><a href="https://netflixtechblog.com/dblog-a-generic-change-data-capture-framework-69351fb9099b" target="_blank">netflixtechblog.com (2020)</a></td>
+        </tr>
+        <tr>
+          <td><strong>Yelp MySQLStreamer</strong><br><span style="color:var(--muted);font-size:11px;">USA, 2016–2018</span></td>
+          <td><span class="med-num">1B+ msg/day</span><br><span style="color:var(--muted);font-size:11px;">~3,000 msg/s sau opt</span></td>
+          <td>On-prem servers (ban đầu), sau đó cloud<br><span style="color:var(--muted);font-size:11px;">Bắt đầu &lt;100 msg/s → 30x</span></td>
+          <td>MySQL binlog (tự xây) → Kafka (Avro) → Hadoop / Redshift / Cassandra</td>
+          <td>Business analytics, data warehouse sync, ML feature store</td>
+          <td><span class="chip chip-yellow">Production (growing)</span></td>
+          <td><a href="https://engineeringblog.yelp.com/2018/02/making-30x-performance-improvements-on-yelps-mysqlstreamer.html" target="_blank">yelp.com/blog (2018)</a></td>
+        </tr>
+        <tr>
+          <td><strong>Kafka benchmark (LinkedIn)</strong><br><span style="color:var(--muted);font-size:11px;">Classic benchmark, 2014</span></td>
+          <td><span class="big-num">2M+ records/s</span><br><span style="color:var(--muted);font-size:11px;">3 producers, async replication</span></td>
+          <td>3× Intel Xeon 2.5GHz 6-core, 32GB RAM<br><span style="color:var(--muted);font-size:11px;">6× 7200RPM HDD JBOD, 1Gb Ethernet</span></td>
+          <td>Pure Kafka (không có CDC, không Spark)<br><span style="color:var(--muted);font-size:11px;">Single purpose: message broker test</span></td>
+          <td>Benchmarking khả năng raw throughput của Kafka</td>
+          <td><span class="chip chip-purple">Lab benchmark</span></td>
+          <td><a href="https://engineering.linkedin.com/kafka/benchmarking-apache-kafka-2-million-writes-second-three-cheap-machines" target="_blank">engineering.linkedin.com (2014)</a></td>
+        </tr>
+        <tr>
+          <td><strong>Debezium MySQL official test</strong><br><span style="color:var(--muted);font-size:11px;">Feb 2026</span></td>
+          <td><span class="med-num">600 events/s</span><br><span style="color:var(--muted);font-size:11px;">real-time catchup</span></td>
+          <td>Test environment (không công bố specs)<br><span style="color:var(--muted);font-size:11px;">Tương tự dev server</span></td>
+          <td>MySQL → Debezium Server → Kafka<br><span style="color:var(--muted);font-size:11px;">300 updates/s + 300 inserts/s</span></td>
+          <td>Benchmarking Debezium Server performance chính thức</td>
+          <td><span class="chip chip-purple">Lab benchmark</span></td>
+          <td><a href="https://debezium.io/blog/2026/02/02/measuring-debezium-server-performance-mysql-streaming/" target="_blank">debezium.io (2026)</a></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ==================== SECTION 3: ORDER VOLUMES ==================== -->
+<section>
+  <div class="section-title">
+    🛒 Khối lượng giao dịch thực tế — E-commerce &amp; Fintech
+    <span class="tag">Có nguồn trích dẫn</span>
+  </div>
+
+  <div class="cards">
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">🛍️ Alibaba — Double 11 (2020)</div>
+          <div class="card-region">Trung Quốc · E-commerce</div>
+        </div>
+        <div class="card-stat">
+          <div class="main">583,000</div>
+          <div class="unit">orders/second peak</div>
+        </div>
+      </div>
+      <div class="card-divider"></div>
+      <div class="card-body">
+        <strong>Thời điểm:</strong> 00:00:26 ngày 11/11/2020<br>
+        <strong>DB:</strong> ApsaraDB POLARDB — cloud-native, 16 nodes/cluster, 100TB storage, 6 replicas cross-zone<br>
+        <strong>Ấn tượng nhất:</strong> $1 tỷ GMV trong 68 giây đầu tiên, <em>zero downtime</em><br>
+        <strong>So sánh:</strong> Cao hơn 1,457× so với Double 11 đầu tiên (2009)
+      </div>
+      <div class="card-link">
+        <a href="https://www.alibabacloud.com/blog/alibaba-cloud-supported-583000-orderssecond-for-2020-double-11---the-highest-traffic-peak-in-the-world_596884" target="_blank">🔗 alibabacloud.com (2020)</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">☁️ Amazon — Prime Day 2025</div>
+          <div class="card-region">Toàn cầu · Cloud + E-commerce</div>
+        </div>
+        <div class="card-stat">
+          <div class="main">151M</div>
+          <div class="unit">req/s (DynamoDB peak)</div>
+        </div>
+      </div>
+      <div class="card-divider"></div>
+      <div class="card-body">
+        <strong>Kinesis Data Streams:</strong> 807M records/s<br>
+        <strong>SQS:</strong> 166M messages/s<br>
+        <strong>Lambda:</strong> &gt;1.7 trillion invocations/day<br>
+        <strong>ElastiCache:</strong> 1.5 quadrillion daily requests<br>
+        <strong>CloudFront:</strong> &gt;3 trillion HTTP requests (toàn sự kiện, +43% vs 2024)
+      </div>
+      <div class="card-link">
+        <a href="https://aws.amazon.com/blogs/aws/aws-services-scale-to-new-heights-for-prime-day-2025-key-metrics-and-milestones/" target="_blank">🔗 aws.amazon.com (2025)</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">🛒 Shopify — BFCM 2024</div>
+          <div class="card-region">Canada/Toàn cầu · E-commerce platform</div>
+        </div>
+        <div class="card-stat">
+          <div class="main">1.33M</div>
+          <div class="unit">req/s (app servers peak)</div>
+        </div>
+      </div>
+      <div class="card-divider"></div>
+      <div class="card-body">
+        <strong>Edge requests:</strong> 284M req/min peak<br>
+        <strong>MySQL QPS:</strong> 45 million/s peak, 1.4B row ops/s<br>
+        <strong>Total DB queries:</strong> 10.5 trillion toàn sự kiện<br>
+        <strong>Data:</strong> 57.3 petabytes · <strong>Logs:</strong> 7TB logs/giây<br>
+        <strong>Sales peak:</strong> $4.2M/phút (Black Friday 12:01pm)
+      </div>
+      <div class="card-link">
+        <a href="https://www.shopify.com/news/bfcm-data-2024" target="_blank">🔗 shopify.com/news (2024)</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">🛍️ Shopee — Double 12 (2018)</div>
+          <div class="card-region">Singapore/SEA · E-commerce</div>
+        </div>
+        <div class="card-stat">
+          <div class="main">11–12M</div>
+          <div class="unit">orders/day (D12)</div>
+        </div>
+      </div>
+      <div class="card-divider"></div>
+      <div class="card-body">
+        <strong>DB:</strong> MySQL (primary) + TiDB (200+TB, 400+ nodes)<br>
+        <strong>Scaling trigger:</strong> 1,000 writes/s per MySQL node<br>
+        <strong>Analytics:</strong> 3M rows/s vào ClickHouse với chỉ 20 CPU cores<br>
+        <strong>Infrastructure:</strong> Hundreds of PBs, hundreds of thousands queries/s
+      </div>
+      <div class="card-link">
+        <a href="https://www.pingcap.com/case-study/choosing-right-database-for-your-applications/" target="_blank">🔗 pingcap.com case study (2019)</a>
+        &nbsp;|&nbsp;
+        <a href="https://clickhouse.com/blog/seeing-the-big-picture-shopees-journey-to-distributed-tracing-with-clickhouse" target="_blank">🔗 clickhouse.com</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">💳 Visa — Global Network</div>
+          <div class="card-region">Toàn cầu · Payments</div>
+        </div>
+        <div class="card-stat">
+          <div class="main">83,000</div>
+          <div class="unit">TPS capacity</div>
+        </div>
+      </div>
+      <div class="card-divider"></div>
+      <div class="card-body">
+        <strong>Peak operational:</strong> ~65,000 TPS<br>
+        <strong>Average:</strong> ~1,700 TPS<br>
+        <strong>Annual:</strong> 322+ billion transactions<br>
+        <strong>Infrastructure:</strong> 7 independent data centers, <strong>99.9999% uptime</strong><br>
+        <strong>Presence:</strong> 150M+ merchant locations worldwide
+      </div>
+      <div class="card-link">
+        <a href="https://corporate.visa.com/en/sites/visa-perspectives/security-trust/inside-visa-global-commerce-engine.html.html" target="_blank">🔗 corporate.visa.com</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">💰 Stripe — BFCM 2023</div>
+          <div class="card-region">USA/Toàn cầu · Payment gateway</div>
+        </div>
+        <div class="card-stat">
+          <div class="main">27,395</div>
+          <div class="unit">req/s (BFCM peak)</div>
+        </div>
+      </div>
+      <div class="card-divider"></div>
+      <div class="card-body">
+        <strong>Average:</strong> 500M API requests/day = ~5,787 req/s<br>
+        <strong>Internal:</strong> ~5 billion ledger events/day<br>
+        <strong>Uptime:</strong> 99.999% trong BFCM peak
+      </div>
+      <div class="card-link">
+        <a href="https://redstagfulfillment.com/how-many-payments-stripe-process-per-day/" target="_blank">🔗 redstagfulfillment.com (2025, trích dẫn Stripe data)</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">🚗 Uber — Kafka + Data Infra</div>
+          <div class="card-region">USA/Toàn cầu · Ride-hailing &amp; Delivery</div>
+        </div>
+        <div class="card-stat">
+          <div class="main">Trillions</div>
+          <div class="unit">msg/day (Kafka, Q4 2020)</div>
+        </div>
+      </div>
+      <div class="card-divider"></div>
+      <div class="card-body">
+        <strong>Kafka:</strong> Một trong các deployments lớn nhất thế giới<br>
+        <strong>Docstore/Flux CDC:</strong> 300,000 QPS write không lag per datacenter<br>
+        <strong>Pinot OLAP:</strong> Tens of thousands QPS, hundreds of TB data<br>
+        <strong>Flink:</strong> Several thousands of jobs, 30% YoY growth<br>
+        <strong>Storage Platform:</strong> Tens of millions QPS, 99.99%+ availability
+      </div>
+      <div class="card-link">
+        <a href="https://ar5iv.labs.arxiv.org/html/2104.00087" target="_blank">🔗 SIGMOD 2021 (arXiv) — "Real-time Data Infrastructure at Uber"</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">💳 PayPal — Database Infrastructure</div>
+          <div class="card-region">USA/Toàn cầu · Payments</div>
+        </div>
+        <div class="card-stat">
+          <div class="main">~475</div>
+          <div class="unit">TPS avg (2023, 41M/day)</div>
+        </div>
+      </div>
+      <div class="card-divider"></div>
+      <div class="card-body">
+        <strong>CyberMonday 2015:</strong> ~450 payments/s live<br>
+        <strong>Internal benchmark:</strong> Scale từ 200K → 1M transactions/s<br>
+        <strong>Monitoring:</strong> 70,000+ physical hosts, 400,000+ container hosts<br>
+        <strong>HERA:</strong> 100 tỷ queries/ngày qua connection proxy
+      </div>
+      <div class="card-link">
+        <a href="https://medium.com/paypal-tech/scaling-database-access-for-100s-of-billions-of-queries-per-day-paypal-introducing-hera-e192adacda54" target="_blank">🔗 medium.com/paypal-tech — Hera</a>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ==================== SECTION 3B: CDC EVENT MULTIPLIER ==================== -->
+<section>
+  <div class="section-title">
+    🔢 Quan trọng: "1 đơn hàng" ≠ "1 CDC event" — Hệ số nhân x7–10
+    <span class="tag">Điểm kỹ thuật then chốt</span>
+  </div>
+
+  <div class="context-box" style="border-left-color:#a855f7;">
+    <div class="title" style="color:#a855f7;">Tại sao phải nhân hệ số khi so sánh "orders/s" với "CDC events/s"?</div>
+    <p>Khi một khách hàng đặt <strong>1 đơn hàng</strong>, hệ thống thực tế ghi vào <strong>nhiều bảng database cùng lúc</strong>. Mỗi row-level change = 1 CDC event mà Debezium capture. Vì vậy <strong>orders/s (business metric)</strong> và <strong>CDC events/s (technical metric)</strong> là hai con số khác nhau.</p>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+    <div class="context-box" style="border-left-color:#6366f1;">
+      <div class="title" style="color:#6366f1;">Schema điển hình: 1 đơn hàng = bao nhiêu CDC events?</div>
+      <div class="table-wrap" style="margin-top:8px;">
+        <table>
+          <thead><tr><th>Bảng DB</th><th>Thao tác</th><th>CDC Events</th></tr></thead>
+          <tbody>
+            <tr><td><code>orders</code></td><td>INSERT</td><td class="num" style="color:var(--green);">1</td></tr>
+            <tr><td><code>order_items</code></td><td>INSERT × N items</td><td class="num" style="color:var(--green);">2–3 (avg 2.5 items)</td></tr>
+            <tr><td><code>inventory</code></td><td>UPDATE × N items</td><td class="num" style="color:var(--green);">2–3</td></tr>
+            <tr><td><code>customers</code></td><td>UPDATE (last_order, total_spent)</td><td class="num" style="color:var(--green);">1</td></tr>
+            <tr><td><code>payments</code></td><td>INSERT</td><td class="num" style="color:var(--green);">1</td></tr>
+            <tr><td><code>cart / cart_items</code></td><td>DELETE</td><td class="num" style="color:var(--yellow);">1–3 (optional)</td></tr>
+            <tr style="border-top:2px solid var(--accent);"><td colspan="2"><strong>Tổng (mức trung bình)</strong></td><td class="num" style="color:var(--orange);font-size:15px;"><strong>~7–10 events/order</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="context-box" style="border-left-color:#22c55e;">
+      <div class="title" style="color:#22c55e;">Pipeline của tôi đang đo gì?</div>
+      <p>Pipeline này đo <strong>CDC events/s</strong> (mỗi INSERT/UPDATE/DELETE vào MySQL = 1 record). Với benchmark quick mode (INSERT-only, 1 table):</p>
+      <p style="margin-top:8px;"><code style="background:rgba(99,102,241,0.2);padding:2px 6px;border-radius:4px;">370 CDC events/s = 370 INSERT rows/s</code></p>
+      <p style="margin-top:8px;">Nếu pipeline xử lý <strong>toàn bộ schema e-commerce</strong> (orders + order_items + inventory + customers + payments), thì:</p>
+      <p style="margin-top:8px; background:rgba(34,197,94,0.1);padding:8px;border-radius:6px;border:1px solid rgba(34,197,94,0.3);">
+        <strong style="color:var(--green);">370 CDC events/s ÷ 8 (hệ số trung bình) ≈ 46 đơn hàng/giây tương đương</strong>
+      </p>
+      <p style="margin-top:6px;color:var(--muted);font-size:12px;">→ Cao hơn 4× so với mức peak của European retailers (11.4 orders/s) nếu tính theo đơn vị tương đương</p>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Nền tảng / Sự kiện</th>
+          <th>Quốc gia</th>
+          <th>Orders/s (peak)</th>
+          <th>Estimated CDC events/s (×7–10)</th>
+          <th>Nguồn</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="highlight-row">
+          <td><strong style="color:#6366f1;">⭐ Pipeline của tôi</strong> (INSERT-only, 1 table)</td>
+          <td>—</td>
+          <td><span class="my-num">~46 orders equiv.</span><br><span style="color:var(--muted);font-size:11px;">(370 ÷ 8 hệ số)</span></td>
+          <td><span class="my-num">370 CDC events/s</span><br><span style="color:var(--muted);font-size:11px;">đo trực tiếp</span></td>
+          <td>Benchmark thực tế</td>
+        </tr>
+        <tr>
+          <td><strong>European mid-size retailers</strong> (aggregate)</td>
+          <td>🇪🇺 Châu Âu</td>
+          <td><span class="med-num">11.4 orders/s</span><br><span style="color:var(--muted);font-size:11px;">+205% vs ngày thường</span></td>
+          <td><span class="num">80–114 events/s</span></td>
+          <td><a href="https://queue-it.com/blog/black-friday-statistics/" target="_blank">queue-it.com →</a></td>
+        </tr>
+        <tr>
+          <td><strong>Otto Group</strong> — Black Friday 2023</td>
+          <td>🇩🇪 Đức</td>
+          <td><span class="med-num">&gt;40 orders/s</span><br><span style="color:var(--muted);font-size:11px;">peak lúc 21:01 local</span></td>
+          <td><span class="num">280–400 events/s</span></td>
+          <td><a href="https://www.ottogroup.com/de/medien/newsroom/meldungen/trafficstaerkster-black-friday-aller-zeiten-bei-otto.php" target="_blank">ottogroup.com (DE) →</a></td>
+        </tr>
+        <tr>
+          <td><strong>Zalando</strong> — Black Friday 2018</td>
+          <td>🇩🇪 Đức/EU</td>
+          <td><span class="med-num">~70 orders/s</span><br><span style="color:var(--muted);font-size:11px;">&gt;4,200 orders/min</span></td>
+          <td><span class="num">490–700 events/s</span></td>
+          <td><a href="https://corporate.zalando.com/en/newsroom/en/stories/infographic-zalandos-black-friday-2018-results" target="_blank">corporate.zalando.com →</a></td>
+        </tr>
+        <tr>
+          <td><strong>Meesho</strong> — Mega Blockbuster Sale 2023</td>
+          <td>🇮🇳 Ấn Độ</td>
+          <td><span class="med-num">72 orders/s</span><br><span style="color:var(--muted);font-size:11px;">Diwali peak</span></td>
+          <td><span class="num">504–720 events/s</span></td>
+          <td><a href="https://www.indianretailer.com/article/retail-business/ecommerce/indian-e-commerce-sensation-meeshos-mega-blockbuster-sale" target="_blank">indianretailer.com →</a></td>
+        </tr>
+        <tr>
+          <td><strong>Flipkart</strong> — Big Billion Days 2020</td>
+          <td>🇮🇳 Ấn Độ</td>
+          <td><span class="big-num">110 orders/s</span><br><span style="color:var(--muted);font-size:11px;">666M lượt truy cập</span></td>
+          <td><span class="num">770–1,100 events/s</span></td>
+          <td><a href="https://www.business-standard.com/article/companies/flipkart-witnessed-110-orders-placements-per-second-during-festival-sale-120102101362_1.html" target="_blank">business-standard.com →</a></td>
+        </tr>
+        <tr>
+          <td><strong>Myntra</strong> — Big Fashion Festival 2022 (capacity)</td>
+          <td>🇮🇳 Ấn Độ</td>
+          <td><span class="big-num">~217 orders/s</span><br><span style="color:var(--muted);font-size:11px;">13,000 orders/min (capacity target)</span></td>
+          <td><span class="num">~1,500–2,200 events/s</span></td>
+          <td><a href="https://www.indianretailer.com/news/myntra-big-fashion-festival-geared-to-handle-13-thousand-orders-per-minute.n14247" target="_blank">indianretailer.com →</a></td>
+        </tr>
+        <tr>
+          <td><strong>Shopify</strong> — BFCM 2024 (tất cả merchants)</td>
+          <td>🌐 Toàn cầu</td>
+          <td><span class="big-num">483 orders/s</span><br><span style="color:var(--muted);font-size:11px;">29,000 orders/min, ~2M merchants</span></td>
+          <td><span class="num">~3,400–4,800 events/s</span></td>
+          <td><a href="https://www.shopify.com/news/bfcm-data-2024" target="_blank">shopify.com/news →</a></td>
+        </tr>
+        <tr>
+          <td><strong>Stripe</strong> — BFCM 2025 (payments)</td>
+          <td>🌐 Toàn cầu</td>
+          <td><span class="big-num">2,533 txn/s</span><br><span style="color:var(--muted);font-size:11px;">152K txn/min peak</span></td>
+          <td><span class="num">N/A (payment events, 1:1 với orders)</span></td>
+          <td><a href="https://stripe.com/newsroom/news/bfcm2025" target="_blank">stripe.com/newsroom →</a></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="color:var(--muted);font-size:12px;margin-top:8px;">* CDC events/s ước tính với hệ số ×7–10 (7=min, 10=max). Hệ số thực tế phụ thuộc schema của từng công ty.</p>
+</section>
+
+<!-- ==================== SECTION 3C: SMB PAYMENT PROCESSORS ==================== -->
+<section>
+  <div class="section-title">
+    💳 Payment Processor Peaks — Dữ liệu từ nền tảng SMB
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">💳 Stripe — BFCM 2025</div>
+          <div class="card-region">Toàn cầu · ~90% khách hàng là SMB/startup</div>
+        </div>
+        <div class="card-stat">
+          <div class="main">2,533</div>
+          <div class="unit">payment txn/s peak</div>
+        </div>
+      </div>
+      <div class="card-divider"></div>
+      <div class="card-body">
+        <strong>2023:</strong> 93,304 txn/min (1,555/s) · $18.6B · 300M txn<br>
+        <strong>2024:</strong> 137,000 txn/min (2,283/s) · $31B · 465M txn<br>
+        <strong>2025:</strong> 152,000 txn/min (2,533/s) · $40B · 578M txn<br>
+        <span style="color:var(--muted);">Lưu ý: Đây là payment events (1 txn ≈ 1 order, không tính CDC events DB phía sau)</span>
+      </div>
+      <div class="card-link">
+        <a href="https://stripe.com/newsroom/news/bfcm2023" target="_blank">🔗 stripe.com/newsroom 2023</a> |
+        <a href="https://stripe.com/newsroom/news/bfcm2024" target="_blank">2024</a> |
+        <a href="https://stripe.com/newsroom/news/bfcm2025" target="_blank">2025</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">🛍️ Shopify — BFCM Historical</div>
+          <div class="card-region">Toàn cầu · 2M+ merchants (chủ yếu SMB)</div>
+        </div>
+        <div class="card-stat">
+          <div class="main">483</div>
+          <div class="unit">orders/s (BFCM 2024 peak)</div>
+        </div>
+      </div>
+      <div class="card-divider"></div>
+      <div class="card-body">
+        <strong>2022:</strong> $3.5M/min · <strong>2023:</strong> $4.2M/min<br>
+        <strong>2024:</strong> 29,000 orders/min = ~483 orders/s · $4.6M/min<br>
+        <strong>2025:</strong> $5.1M/min · 31.8M API req/min<br>
+        <span style="color:var(--muted);">Tổng tất cả merchants trên platform. 1 merchant trung bình = ~0.02 orders/s lúc peak</span>
+      </div>
+      <div class="card-link">
+        <a href="https://www.shopify.com/news/bfcm-data-2024" target="_blank">🔗 shopify.com/news (2024)</a> |
+        <a href="https://www.shopify.com/news/bfcm-data-2025" target="_blank">2025</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">🏪 Otto Group — Black Friday 2023</div>
+          <div class="card-region">🇩🇪 Đức · Retailer lớn nhất Đức (fashion/electronics)</div>
+        </div>
+        <div class="card-stat">
+          <div class="main">&gt;40</div>
+          <div class="unit">orders/s peak</div>
+        </div>
+      </div>
+      <div class="card-divider"></div>
+      <div class="card-body">
+        <strong>Peak:</strong> 21:01 giờ địa phương ngày Black Friday<br>
+        <strong>Mô tả:</strong> "Trafficstärkster Black Friday aller Zeiten" (BF traffic mạnh nhất lịch sử)<br>
+        <strong>Revenue:</strong> ~€4.2B annual (2023)<br>
+        <strong>→ Ước tính CDC events:</strong> ~280–400 events/s
+      </div>
+      <div class="card-link">
+        <a href="https://www.ottogroup.com/de/medien/newsroom/meldungen/trafficstaerkster-black-friday-aller-zeiten-bei-otto.php" target="_blank">🔗 ottogroup.com (tiếng Đức)</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">👗 Myntra — Big Fashion Festival 2022</div>
+          <div class="card-region">🇮🇳 Ấn Độ · Online fashion lớn nhất Ấn Độ</div>
+        </div>
+        <div class="card-stat">
+          <div class="main">13,000</div>
+          <div class="unit">orders/min capacity (217/s)</div>
+        </div>
+      </div>
+      <div class="card-divider"></div>
+      <div class="card-body">
+        <strong>Note:</strong> Đây là <em>infrastructure capacity target</em> (xây sẵn để handle), không phải peak thực đo<br>
+        <strong>2023:</strong> ~2× vs 2022 = ~26,000 orders/min = ~433/s (ước tính)<br>
+        <strong>DB:</strong> MySQL + Redis + nhiều microservices
+      </div>
+      <div class="card-link">
+        <a href="https://www.indianretailer.com/news/myntra-big-fashion-festival-geared-to-handle-13-thousand-orders-per-minute.n14247" target="_blank">🔗 indianretailer.com (2022)</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">📦 Meesho — Mega Blockbuster Sale 2023</div>
+          <div class="card-region">🇮🇳 Ấn Độ · Social commerce, tier-2/3 cities</div>
+        </div>
+        <div class="card-stat">
+          <div class="main">72</div>
+          <div class="unit">orders/s peak (Diwali)</div>
+        </div>
+      </div>
+      <div class="card-divider"></div>
+      <div class="card-body">
+        <strong>Sale:</strong> Diwali festive season 2023<br>
+        <strong>Traffic:</strong> 1.2 billion customer visits, 1.6 crore new app installs<br>
+        <strong>Top categories:</strong> Home &amp; Kitchen, Fashion, Beauty<br>
+        <strong>→ Ước tính CDC events:</strong> ~504–720 events/s
+      </div>
+      <div class="card-link">
+        <a href="https://www.indianretailer.com/article/retail-business/ecommerce/indian-e-commerce-sensation-meeshos-mega-blockbuster-sale" target="_blank">🔗 indianretailer.com (2023)</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">🛒 Flipkart — Big Billion Days 2020</div>
+          <div class="card-region">🇮🇳 Ấn Độ · 2nd largest e-commerce platform</div>
+        </div>
+        <div class="card-stat">
+          <div class="main">110</div>
+          <div class="unit">orders/s peak</div>
+        </div>
+      </div>
+      <div class="card-divider"></div>
+      <div class="card-body">
+        <strong>Traffic:</strong> 666 million visits trong sale period<br>
+        <strong>Confirmed by:</strong> Business Standard, Business Insider India, Zee News<br>
+        <strong>Context:</strong> Đây là nền tảng lớn (200M+ users) nhưng số 110/s là hữu ích làm reference cho large regional platform<br>
+        <strong>→ Ước tính CDC events:</strong> ~770–1,100 events/s
+      </div>
+      <div class="card-link">
+        <a href="https://www.business-standard.com/article/companies/flipkart-witnessed-110-orders-placements-per-second-during-festival-sale-120102101362_1.html" target="_blank">🔗 business-standard.com (2020)</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SECTION 4: CDC ARCHITECTURES ==================== -->
+<section>
+  <div class="section-title">
+    🏛️ So sánh kiến trúc CDC của các công ty lớn vs Pipeline của tôi
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Công ty</th>
+          <th>CDC Tool</th>
+          <th>Source DB</th>
+          <th>Message Broker</th>
+          <th>Stream Processor</th>
+          <th>Sink(s)</th>
+          <th>Điểm đặc biệt</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="highlight-row">
+          <td><strong style="color:#6366f1;">⭐ Pipeline của tôi</strong></td>
+          <td><span class="chip chip-blue">Debezium 2.5</span></td>
+          <td>MySQL 8.0</td>
+          <td>Kafka (Confluent 7.5, 1 broker)</td>
+          <td>Spark Structured Streaming 3.5 (Scala)</td>
+          <td>MongoDB 7.0 + Redis 7</td>
+          <td>Micro-batch 5s trigger; Prometheus + Grafana monitoring; Redis counter for real-time stats</td>
+        </tr>
+        <tr>
+          <td><strong>Shopify</strong></td>
+          <td><span class="chip chip-blue">Debezium</span></td>
+          <td>MySQL (100+ shards)</td>
+          <td>Kafka (400TB cluster, 1 connector/shard)</td>
+          <td>Custom consumers (Go/Ruby)</td>
+          <td>BigQuery, Elasticsearch, data warehouse</td>
+          <td>150 Debezium connectors; 1 connector per MySQL shard; compacted topics theo primary key</td>
+        </tr>
+        <tr>
+          <td><strong>Grab</strong></td>
+          <td><span class="chip chip-blue">Debezium</span> (MySQL)</td>
+          <td>MySQL (nhiều services)</td>
+          <td>Kafka (Kafka Connect framework)</td>
+          <td>Apache Flink</td>
+          <td>Elasticsearch, BigQuery, databases</td>
+          <td>Quản lý offsets thủ công sau DB migrations; 5,000+ streaming resources</td>
+        </tr>
+        <tr>
+          <td><strong>Netflix</strong></td>
+          <td><span class="chip chip-purple">DBLog (tự xây)</span></td>
+          <td>MySQL, PostgreSQL, CockroachDB, Cassandra</td>
+          <td>Kafka (AWS MSK)</td>
+          <td>Apache Flink (Delta platform)</td>
+          <td>Elasticsearch, Cassandra, S3, Aurora</td>
+          <td>DBLog: generic framework hỗ trợ nhiều DB engines; Delta: enrichment pipeline trên Kafka</td>
+        </tr>
+        <tr>
+          <td><strong>LinkedIn</strong></td>
+          <td><span class="chip chip-purple">Brooklin (tự xây)</span></td>
+          <td>Oracle, Espresso, MySQL</td>
+          <td>Kafka (tự quản lý)</td>
+          <td>Custom Brooklin connectors</td>
+          <td>HDFS, Espresso, Azure, downstream apps</td>
+          <td>Tự xây vì không có tool phù hợp năm 2016; 2,000+ datastreams, 1,000+ sources</td>
+        </tr>
+        <tr>
+          <td><strong>Uber</strong></td>
+          <td><span class="chip chip-purple">Flux (tự xây)</span></td>
+          <td>MySQL (thousands of tables)</td>
+          <td>Kafka (Schiphol, SJC, DFW DCs)</td>
+          <td>Flink (thousands of jobs)</td>
+          <td>Pinot (OLAP), Hive, Cassandra, multiple DCs</td>
+          <td>Storagetapper (open-source) stream từ hàng nghìn MySQL tables; Flux powers cross-DC replication</td>
+        </tr>
+        <tr>
+          <td><strong>Yelp</strong></td>
+          <td><span class="chip chip-purple">MySQLStreamer (tự xây)</span></td>
+          <td>MySQL</td>
+          <td>Kafka (Avro encoding)</td>
+          <td>Custom consumers</td>
+          <td>Hadoop, Redshift, Cassandra</td>
+          <td>30x optimization qua batching; tiết kiệm $10M/năm; &gt;1B messages/day</td>
+        </tr>
+        <tr>
+          <td><strong>Traveloka</strong></td>
+          <td>Kafka (producers)</td>
+          <td>MySQL + multiple</td>
+          <td>Kafka → GCP Pub/Sub</td>
+          <td>Google Cloud Dataflow (managed Apache Beam)</td>
+          <td>BigQuery</td>
+          <td>Migration từ MemSQL sang BigQuery; managed Dataflow loại bỏ ops overhead</td>
+        </tr>
+        <tr>
+          <td><strong>Gojek</strong></td>
+          <td>Kafka producers + Firehose</td>
+          <td>Multiple microservices DBs</td>
+          <td>Kafka (multi-region, rack-aware)</td>
+          <td>Firehose (open-source Java)</td>
+          <td>BigQuery (600 topics), GCS (700 topics)</td>
+          <td>Firehose open-sourced; latency &lt;5min MySQL→BigQuery; 6B events/day</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ==================== SECTION 5: CONTEXT ANALYSIS ==================== -->
+<section>
+  <div class="section-title">
+    🔍 Tại sao không nên so sánh con số thẳng — và tại sao hệ thống hoạt động tốt
+  </div>
+
+  <!-- Part A: Why numbers differ -->
+  <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">Phần A giải thích các yếu tố <strong>môi trường</strong> (khách quan, không phải do thiết kế). Phần B giải thích các <strong>quyết định kỹ thuật chủ động</strong> giúp pipeline đạt được thông số tốt trong khuôn khổ phần cứng đã có.</p>
+
+  <div style="background:rgba(239,68,68,0.05);border:1px solid rgba(239,68,68,0.2);border-radius:8px;padding:4px 12px;margin-bottom:8px;">
+    <p style="color:#ef4444;font-size:12px;font-weight:600;margin:8px 0 4px;">PHẦN A — Yếu tố môi trường (honest disclosure)</p>
+  </div>
+
+  <div class="context-box">
+    <div class="title">A1. Phần cứng — Sự khác biệt quyết định</div>
+    <ul>
+      <li><strong>Kafka benchmark (2M records/s):</strong> 3× Intel Xeon 6-core, 32GB RAM, 6× HDD JBOD, 1Gb Ethernet — không phải laptop</li>
+      <li><strong>Shopify CDC (100K rec/s):</strong> 12 Kubernetes pods trên production cloud với auto-scaling vô hạn</li>
+      <li><strong>Traveloka (50K events/s):</strong> Google Cloud Dataflow — managed, auto-scale theo load</li>
+      <li><strong>Pipeline của tôi (370 CDC/s):</strong> i5 laptop, 12 Docker containers dùng chung 1 CPU + RAM</li>
+    </ul>
+  </div>
+
+  <div class="context-box">
+    <div class="title">A2. Network latency — Lý do lớn nhất con số "trông tốt hơn"</div>
+    <ul>
+      <li><strong>Setup của tôi:</strong> Docker bridge network ≈ <strong>0ms</strong> giữa tất cả services (MySQL, Kafka, Spark, MongoDB cùng máy)</li>
+      <li><strong>Production thực tế:</strong> Cross-datacenter 1–50ms · Cross-region 50–200ms · Thêm TCP handshake, TLS overhead</li>
+      <li><strong>Tác động:</strong> Mỗi hop thêm 10ms = Spark trigger 5s xử lý được ít batch hơn → throughput giảm đáng kể trong production</li>
+      <li><strong>Ví dụ:</strong> European retailers (11.4 orders/s) chạy trên distributed infra với real network — đây là throughput <em>thật sau khi có network overhead</em></li>
+    </ul>
+  </div>
+
+  <div class="context-box">
+    <div class="title">A3. Replication &amp; Durability — Bị bỏ qua trong dev setup</div>
+    <ul>
+      <li><strong>Setup của tôi:</strong> Kafka RF=1 (no replication), fsync dev mode (writes không flush disk ngay)</li>
+      <li><strong>Production:</strong> Kafka RF=3 + acks=all → giảm ~49% throughput (LinkedIn benchmark: 821K/s → 421K/s khi bật sync replication)</li>
+      <li><strong>Kết luận:</strong> Nếu bật RF=3, throughput của pipeline này sẽ giảm còn ~190 CDC/s — vẫn đủ cho single-node use case</li>
+    </ul>
+  </div>
+
+  <div class="context-box">
+    <div class="title">A4. Concurrent load — Benchmark chạy single-threaded</div>
+    <ul>
+      <li><strong>Setup của tôi:</strong> 1 thread inject rows, không có concurrent producers, không có lock contention giữa sessions</li>
+      <li><strong>Production:</strong> Hàng trăm/nghìn users đồng thời → connection pool saturation, row-level locking, transaction isolation overhead</li>
+      <li><strong>Tác động thực tế:</strong> Yelp ghi nhận cần 30x optimization sau khi scale lên production load có concurrent writers</li>
+    </ul>
+  </div>
+
+  <!-- Part B: Genuine engineering decisions -->
+  <div style="background:rgba(34,197,94,0.05);border:1px solid rgba(34,197,94,0.2);border-radius:8px;padding:4px 12px;margin-top:20px;margin-bottom:8px;">
+    <p style="color:#22c55e;font-size:12px;font-weight:600;margin:8px 0 4px;">PHẦN B — Quyết định kỹ thuật chủ động (engineering choices)</p>
+  </div>
+
+  <div class="context-box" style="border-left-color:var(--green);">
+    <div class="title" style="color:var(--green);">B1. Scala thay vì Python — Chọn đúng runtime cho workload</div>
+    <ul>
+      <li><strong>Kết quả:</strong> Scala 370 CDC/s vs Python 82.5 CDC/s — <strong>4.5× faster</strong> trên cùng phần cứng</li>
+      <li><strong>Lý do kỹ thuật:</strong> Scala JAR compile thành JVM bytecode, chạy native trong Spark JVM. Python cần serialize data qua Py4J bridge mỗi batch → overhead đáng kể trong <code>foreachBatch</code></li>
+      <li><strong>Context industry:</strong> Shopify (Go/Ruby consumers), LinkedIn (Scala Brooklin) cũng chọn compiled language cho CDC workload vì lý do tương tự</li>
+    </ul>
+  </div>
+
+  <div class="context-box" style="border-left-color:var(--green);">
+    <div class="title" style="color:var(--green);">B2. Micro-batch accumulation — Giảm MongoDB round-trips</div>
+    <ul>
+      <li><strong>Design:</strong> Spark trigger 5s micro-batch → tích lũy nhiều CDC events → 1 <code>bulkWrite()</code> MongoDB per batch thay vì N lần ghi đơn lẻ</li>
+      <li><strong>Kết quả:</strong> Spark p50 batch duration ~1,000ms xử lý hàng trăm documents — nếu ghi từng record riêng lẻ sẽ mất hàng chục giây</li>
+      <li><strong>Trade-off rõ ràng:</strong> Latency tăng (worst-case 5s) đổi lấy throughput cao hơn và ít overhead hơn — đây là lý do tại sao Spark Structured Streaming chọn micro-batch thay vì record-by-record</li>
+    </ul>
+  </div>
+
+  <div class="context-box" style="border-left-color:var(--green);">
+    <div class="title" style="color:var(--green);">B3. Idempotent upsert pattern — Exactly-once semantics không cần distributed lock</div>
+    <ul>
+      <li><strong>Design:</strong> MongoDB upsert by primary key (<code>filter: {_id: row.id}, update: $set, upsert: true</code>) — ghi cùng record 2 lần không tạo duplicate</li>
+      <li><strong>Kết quả:</strong> Spark checkpoint + idempotent sink = exactly-once processing mà không cần 2-phase commit hay distributed lock</li>
+      <li><strong>Context industry:</strong> Netflix Delta, Grab Coban đều dùng cùng pattern này. Yelp ban đầu không có idempotency → gặp vấn đề duplicate khi retry → phải redesign</li>
+    </ul>
+  </div>
+
+  <div class="context-box" style="border-left-color:var(--green);">
+    <div class="title" style="color:var(--green);">B4. Write-aside Redis counter — Tách analytics query khỏi write path</div>
+    <ul>
+      <li><strong>Design:</strong> Spark cập nhật Redis counter (<code>INCR customers:total</code>) song song với MongoDB write trong cùng batch — real-time dashboard không cần query MongoDB</li>
+      <li><strong>Kết quả:</strong> Latency đọc counter = O(1) Redis GET, không phải O(n) MongoDB COUNT() trên collection lớn</li>
+      <li><strong>Context industry:</strong> Pattern "write-aside cache" phổ biến ở Grab (Redis cho real-time trip count), Twitter (Redis cho follower count)</li>
+    </ul>
+  </div>
+
+  <div class="context-box" style="border-left-color:var(--green);">
+    <div class="title" style="color:var(--green);">B5. Full observability stack — Phát hiện bottleneck chính xác</div>
+    <ul>
+      <li><strong>Design:</strong> Prometheus scrape từ mọi stage: MySQL binlog lag, Kafka consumer lag, Spark batch duration, MongoDB write rate, Redis counters</li>
+      <li><strong>Giá trị thực tế:</strong> Khi Kafka lag tăng → biết ngay bottleneck ở Spark, không phải Debezium. Khi Spark batch duration tiệm cận 5s → Grafana alert cảnh báo trước khi lag tích lũy</li>
+      <li><strong>Context industry:</strong> Uber (SIGMOD 2021): "Observability is the key enabler for operating real-time data infrastructure at scale" — họ mất nhiều tháng để build monitoring cho từng stage</li>
+    </ul>
+  </div>
+
+  <!-- Summary comparison -->
+  <div style="background:linear-gradient(135deg,rgba(34,197,94,0.05),rgba(99,102,241,0.05));border:1px solid var(--border);border-radius:10px;padding:20px;margin-top:20px;">
+    <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:12px;">Tổng kết: Phân biệt "may mắn do setup" vs "tốt do thiết kế"</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Yếu tố</th><th>Loại</th><th>Tác động đến số 370 CDC/s</th><th>Có thể nói với thầy</th></tr></thead>
+        <tbody>
+          <tr><td>Localhost (0ms network)</td><td><span class="chip chip-red">Setup</span></td><td>Cao hơn production ~30–50%</td><td>Cần thừa nhận rõ ràng</td></tr>
+          <tr><td>Kafka RF=1 (no replication)</td><td><span class="chip chip-red">Setup</span></td><td>Cao hơn RF=3 khoảng 2×</td><td>Cần thừa nhận rõ ràng</td></tr>
+          <tr><td>Single-threaded inject</td><td><span class="chip chip-red">Setup</span></td><td>Tránh được lock contention</td><td>Cần thừa nhận rõ ràng</td></tr>
+          <tr><td><strong>Scala vs Python</strong></td><td><span class="chip chip-green">Engineering</span></td><td><strong>4.5× higher throughput</strong></td><td><strong>✅ Quyết định chủ động, có thể tự hào</strong></td></tr>
+          <tr><td><strong>Micro-batch bulkWrite</strong></td><td><span class="chip chip-green">Engineering</span></td><td><strong>Giảm MongoDB I/O đáng kể</strong></td><td><strong>✅ Quyết định chủ động, có thể tự hào</strong></td></tr>
+          <tr><td><strong>Idempotent upsert</strong></td><td><span class="chip chip-green">Engineering</span></td><td><strong>Exactly-once không cần lock</strong></td><td><strong>✅ Đây là correctness, không chỉ performance</strong></td></tr>
+          <tr><td><strong>Write-aside Redis</strong></td><td><span class="chip chip-green">Engineering</span></td><td><strong>Read latency O(1) thay vì O(n)</strong></td><td><strong>✅ Cùng pattern với Grab, Twitter</strong></td></tr>
+          <tr><td><strong>Full observability</strong></td><td><span class="chip chip-green">Engineering</span></td><td><strong>Phát hiện bottleneck chính xác</strong></td><td><strong>✅ "Production-ready monitoring"</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SECTION 6: SOURCES ==================== -->
+<section>
+  <div class="section-title">
+    📚 Tất cả nguồn trích dẫn
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Công ty / Chủ đề</th>
+          <th>Tiêu đề bài viết</th>
+          <th>Năm</th>
+          <th>Link</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>Alibaba Cloud</td><td>Alibaba Cloud Supported 583,000 Orders/sec for Double 11</td><td>2020</td><td><a href="https://www.alibabacloud.com/blog/alibaba-cloud-supported-583000-orderssecond-for-2020-double-11---the-highest-traffic-peak-in-the-world_596884" target="_blank">alibabacloud.com →</a></td></tr>
+        <tr><td>2</td><td>Alibaba Cloud</td><td>Alibaba Cloud databases support 87 million TPS (stress test)</td><td>2019</td><td><a href="https://www.alibabacloud.com/blog/learn-how-alibaba-clouds-databases-could-support-87-million-transactions-per-second_595593" target="_blank">alibabacloud.com →</a></td></tr>
+        <tr><td>3</td><td>Amazon AWS</td><td>AWS Services Scale to New Heights for Prime Day 2025</td><td>2025</td><td><a href="https://aws.amazon.com/blogs/aws/aws-services-scale-to-new-heights-for-prime-day-2025-key-metrics-and-milestones/" target="_blank">aws.amazon.com →</a></td></tr>
+        <tr><td>4</td><td>Shopify</td><td>BFCM 2024 Data Report</td><td>2024</td><td><a href="https://www.shopify.com/news/bfcm-data-2024" target="_blank">shopify.com →</a></td></tr>
+        <tr><td>5</td><td>Shopify Engineering</td><td>Capturing Every Change from Shopify's Sharded Monolith</td><td>2021</td><td><a href="https://shopify.engineering/capturing-every-change-shopify-sharded-monolith" target="_blank">shopify.engineering →</a></td></tr>
+        <tr><td>6</td><td>Traveloka</td><td>Traveloka's Journey to Stream Analytics on Google Cloud Platform</td><td>2019</td><td><a href="https://cloud.google.com/blog/products/gcp/travelokas-journey-to-stream-analytics-on-google-cloud-platform" target="_blank">cloud.google.com →</a></td></tr>
+        <tr><td>7</td><td>Gojek</td><td>Introducing Firehose: An Open-Source Tool from Gojek</td><td>2020</td><td><a href="https://cloud.google.com/blog/products/data-analytics/introducing-firehose-an-open-source-tool-from-gojek" target="_blank">cloud.google.com →</a></td></tr>
+        <tr><td>8</td><td>Grab Engineering</td><td>An Elegant Platform — Coban Streaming Infrastructure</td><td>2023</td><td><a href="https://engineering.grab.com/an-elegant-platform" target="_blank">engineering.grab.com →</a></td></tr>
+        <tr><td>9</td><td>Grab Engineering</td><td>Kafka Connect + Debezium CDC at Grab</td><td>2023</td><td><a href="https://engineering.grab.com/kafka-connect" target="_blank">engineering.grab.com →</a></td></tr>
+        <tr><td>10</td><td>Grab + AutoMQ</td><td>How Grab Uses AutoMQ to Solve Kafka Challenges</td><td>2023</td><td><a href="https://www.automq.com/blog/how-grab-uses-automq-solve-kafka-challenges" target="_blank">automq.com →</a></td></tr>
+        <tr><td>11</td><td>Uber (SIGMOD 2021)</td><td>Real-time Data Infrastructure at Uber (peer-reviewed)</td><td>2021</td><td><a href="https://ar5iv.labs.arxiv.org/html/2104.00087" target="_blank">arXiv / SIGMOD →</a></td></tr>
+        <tr><td>12</td><td>Uber</td><td>Building Scalable Streaming Pipelines at Uber</td><td>2022</td><td><a href="https://www.uber.com/us/en/blog/building-scalable-streaming-pipelines/" target="_blank">uber.com/blog →</a></td></tr>
+        <tr><td>13</td><td>Uber</td><td>Uber Storagetapper — MySQL binlog streaming (open source)</td><td>2021</td><td><a href="https://github.com/uber/storagetapper" target="_blank">github.com/uber →</a></td></tr>
+        <tr><td>14</td><td>LinkedIn</td><td>Brooklin: Near Real-time Data Streaming Platform (open source)</td><td>2019</td><td><a href="https://engineering.linkedin.com/blog/2019/brooklin-open-source" target="_blank">engineering.linkedin.com →</a></td></tr>
+        <tr><td>15</td><td>LinkedIn</td><td>Benchmarking Apache Kafka: 2 Million Writes/sec on 3 Cheap Machines</td><td>2014</td><td><a href="https://engineering.linkedin.com/kafka/benchmarking-apache-kafka-2-million-writes-second-three-cheap-machines" target="_blank">engineering.linkedin.com →</a></td></tr>
+        <tr><td>16</td><td>Netflix</td><td>DBLog: A Generic Change-Data-Capture Framework</td><td>2020</td><td><a href="https://netflixtechblog.com/dblog-a-generic-change-data-capture-framework-69351fb9099b" target="_blank">netflixtechblog.com →</a></td></tr>
+        <tr><td>17</td><td>Netflix</td><td>Delta: A Data Synchronization and Enrichment Platform</td><td>2021</td><td><a href="https://netflixtechblog.com/delta-a-data-synchronization-and-enrichment-platform-e82c36a79aee" target="_blank">netflixtechblog.com →</a></td></tr>
+        <tr><td>18</td><td>Yelp</td><td>Billions of Messages a Day — Yelp's Real-time Data Pipeline</td><td>2016</td><td><a href="https://engineeringblog.yelp.com/2016/07/billions-of-messages-a-day-yelps-real-time-data-pipeline.html" target="_blank">engineeringblog.yelp.com →</a></td></tr>
+        <tr><td>19</td><td>Yelp</td><td>Making 30x Performance Improvements on Yelp's MySQLStreamer</td><td>2018</td><td><a href="https://engineeringblog.yelp.com/2018/02/making-30x-performance-improvements-on-yelps-mysqlstreamer.html" target="_blank">engineeringblog.yelp.com →</a></td></tr>
+        <tr><td>20</td><td>Confluent</td><td>Kafka Performance Benchmark (2023)</td><td>2023</td><td><a href="https://developer.confluent.io/learn/kafka-performance/" target="_blank">developer.confluent.io →</a></td></tr>
+        <tr><td>21</td><td>Honeycomb.io</td><td>Scaling Kafka Observability Pipelines (~1.4M msg/s)</td><td>2022</td><td><a href="https://www.honeycomb.io/blog/scaling-kafka-observability-pipelines" target="_blank">honeycomb.io →</a></td></tr>
+        <tr><td>22</td><td>Databricks</td><td>Benchmarking Structured Streaming on Databricks vs State-of-the-art</td><td>2017</td><td><a href="https://www.databricks.com/blog/2017/10/11/benchmarking-structured-streaming-on-databricks-runtime-against-state-of-the-art-streaming-systems.html" target="_blank">databricks.com →</a></td></tr>
+        <tr><td>23</td><td>Debezium (official)</td><td>Measuring Debezium Server Performance — MySQL Streaming (2026)</td><td>2026</td><td><a href="https://debezium.io/blog/2026/02/02/measuring-debezium-server-performance-mysql-streaming/" target="_blank">debezium.io →</a></td></tr>
+        <tr><td>24</td><td>RisingWave</td><td>Debezium Performance Tuning — Throughput and Latency</td><td>2024</td><td><a href="https://risingwave.com/blog/debezium-performance-tuning-throughput-latency/" target="_blank">risingwave.com →</a></td></tr>
+        <tr><td>25</td><td>Shopee / PingCAP</td><td>Shopee TiDB Case Study — Choosing Right Database</td><td>2019</td><td><a href="https://www.pingcap.com/case-study/choosing-right-database-for-your-applications/" target="_blank">pingcap.com →</a></td></tr>
+        <tr><td>26</td><td>Shopee / ClickHouse</td><td>Shopee's Journey to Distributed Tracing with ClickHouse</td><td>2023</td><td><a href="https://clickhouse.com/blog/seeing-the-big-picture-shopees-journey-to-distributed-tracing-with-clickhouse" target="_blank">clickhouse.com →</a></td></tr>
+        <tr><td>27</td><td>Visa</td><td>Inside Visa's Global Commerce Engine</td><td>—</td><td><a href="https://corporate.visa.com/en/sites/visa-perspectives/security-trust/inside-visa-global-commerce-engine.html.html" target="_blank">corporate.visa.com →</a></td></tr>
+        <tr><td>28</td><td>PayPal</td><td>Scaling Database Access for 100s of Billions of Queries per Day</td><td>—</td><td><a href="https://medium.com/paypal-tech/scaling-database-access-for-100s-of-billions-of-queries-per-day-paypal-introducing-hera-e192adacda54" target="_blank">medium.com/paypal-tech →</a></td></tr>
+        <tr><td>29</td><td>Stripe</td><td>How Many Payments Does Stripe Process per Day?</td><td>2025</td><td><a href="https://redstagfulfillment.com/how-many-payments-stripe-process-per-day/" target="_blank">redstagfulfillment.com →</a></td></tr>
+        <tr><td>30</td><td>Stripe BFCM 2023</td><td>Stripe Newsroom — BFCM 2023 Peak: 93,304 txn/min</td><td>2023</td><td><a href="https://stripe.com/newsroom/news/bfcm2023" target="_blank">stripe.com/newsroom →</a></td></tr>
+        <tr><td>31</td><td>Stripe BFCM 2024</td><td>Stripe Newsroom — BFCM 2024 Peak: 137,000 txn/min</td><td>2024</td><td><a href="https://stripe.com/newsroom/news/bfcm2024" target="_blank">stripe.com/newsroom →</a></td></tr>
+        <tr><td>32</td><td>Stripe BFCM 2025</td><td>Stripe Newsroom — BFCM 2025 Peak: 152,000 txn/min</td><td>2025</td><td><a href="https://stripe.com/newsroom/news/bfcm2025" target="_blank">stripe.com/newsroom →</a></td></tr>
+        <tr><td>33</td><td>Otto Group (🇩🇪 Germany)</td><td>Trafficstärkster Black Friday — &gt;40 orders/sec peak</td><td>2023</td><td><a href="https://www.ottogroup.com/de/medien/newsroom/meldungen/trafficstaerkster-black-friday-aller-zeiten-bei-otto.php" target="_blank">ottogroup.com (DE) →</a></td></tr>
+        <tr><td>34</td><td>Zalando (🇩🇪 Germany)</td><td>Black Friday 2018 Infographic — &gt;4,200 orders/min (~70/s)</td><td>2018</td><td><a href="https://corporate.zalando.com/en/newsroom/en/stories/infographic-zalandos-black-friday-2018-results" target="_blank">corporate.zalando.com →</a></td></tr>
+        <tr><td>35</td><td>Queue-It / Cross-Border Mag (🇪🇺 Europe)</td><td>11.4 orders/second — European retailers Black Friday peak (+205%)</td><td>2022–2025</td><td><a href="https://queue-it.com/blog/black-friday-statistics/" target="_blank">queue-it.com →</a> | <a href="https://cross-border-magazine.com/black-friday-2025-forecast-in-the-eu/" target="_blank">cross-border-magazine.com →</a></td></tr>
+        <tr><td>36</td><td>Printful Blog</td><td>Black Friday Statistics — 11.4 orders/sec European peak, US $10.8B BF sales</td><td>2024</td><td><a href="https://www.printful.com/blog/black-friday-statistics" target="_blank">printful.com/blog →</a></td></tr>
+        <tr><td>37</td><td>Flipkart (🇮🇳 India)</td><td>Big Billion Days 2020 — 110 orders/second peak, 666M visits</td><td>2020</td><td><a href="https://www.business-standard.com/article/companies/flipkart-witnessed-110-orders-placements-per-second-during-festival-sale-120102101362_1.html" target="_blank">business-standard.com →</a> | <a href="https://www.businessinsider.in/business/ecommerce/news/flipkart-big-billion-sale-report-over-100-orders-per-second-10-million-products-delivered-already/articleshow/78790627.cms" target="_blank">businessinsider.in →</a></td></tr>
+        <tr><td>38</td><td>Meesho (🇮🇳 India)</td><td>Mega Blockbuster Sale 2023 — 72 orders/sec peak, 1.2B customer visits</td><td>2023</td><td><a href="https://www.indianretailer.com/article/retail-business/ecommerce/indian-e-commerce-sensation-meeshos-mega-blockbuster-sale" target="_blank">indianretailer.com →</a></td></tr>
+        <tr><td>39</td><td>Myntra (🇮🇳 India)</td><td>Big Fashion Festival 2022 — 13,000 orders/min capacity (217/sec)</td><td>2022</td><td><a href="https://www.indianretailer.com/news/myntra-big-fashion-festival-geared-to-handle-13-thousand-orders-per-minute.n14247" target="_blank">indianretailer.com →</a></td></tr>
+        <tr><td>40</td><td>Amazon India (🇮🇳)</td><td>Great Indian Festival 2023 — 75 smartphones/sec in first hour</td><td>2023</td><td><a href="https://www.aboutamazon.in/news/retail/great-indian-festival-2023-stats" target="_blank">aboutamazon.in →</a></td></tr>
+        <tr><td>41</td><td>Shopify BFCM 2024</td><td>29,000 orders/minute (~483/sec) across all merchants</td><td>2024</td><td><a href="https://www.shopify.com/news/bfcm-data-2024" target="_blank">shopify.com/news →</a></td></tr>
+        <tr><td>42</td><td>Shopify BFCM 2025</td><td>$5.1M/min, 31.8M API req/min</td><td>2025</td><td><a href="https://www.shopify.com/news/bfcm-data-2025" target="_blank">shopify.com/news →</a></td></tr>
+        <tr><td>43</td><td>PayPal Black Friday 2018</td><td>$25,000/second processed (~250–500 txn/sec) — TechCrunch</td><td>2018</td><td><a href="https://techcrunch.com/2018/11/30/paypal-black-friday-cyber-monday-broke-records-with-1b-in-mobile-payment-volume/" target="_blank">techcrunch.com →</a></td></tr>
+        <tr><td>44</td><td>Fnac Darty (🇫🇷 France)</td><td>Black Friday infrastructure — 4–5x baseline load spike (Kyndryl/Azure)</td><td>2023</td><td><a href="https://www.republik-retail.fr/solutions-techno/data/pratiques/e-commerce-la-methode-de-fnac-darty-pour-absorber-le-pic-du-black-friday.html" target="_blank">republik-retail.fr (FR) →</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ==================== SECTION 7: KEY TAKEAWAYS ==================== -->
+<section>
+  <div class="section-title">
+    💡 Kết luận cho buổi bảo vệ — Câu trả lời cho từng câu hỏi thầy có thể hỏi
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;">
+
+    <div class="context-box" style="border-left-color:#6366f1;">
+      <div class="title" style="color:#6366f1;">"Con số 370 rec/s có ý nghĩa gì?"</div>
+      <p>370 CDC events/s ≈ <strong>~46 đơn hàng tương đương/giây</strong> khi áp hệ số ×8 (số bảng DB thay đổi per order). So sánh cùng đơn vị: cao hơn 4× mức peak European retailers (11.4 orders/s) và xấp xỉ Zalando 2018 (70 orders/s). Đây là throughput <strong>thật, đo bằng delta MongoDB</strong>, không phải estimate.</p>
+    </div>
+
+    <div class="context-box" style="border-left-color:#eab308;">
+      <div class="title" style="color:#eab308;">"Tại sao con số cao hơn một số hệ thống production?"</div>
+      <p>3 yếu tố môi trường cần thừa nhận thẳng thắn: (1) <strong>Localhost 0ms</strong> vs production 1–50ms network; (2) <strong>Kafka RF=1</strong> vs RF=3 production (giảm ~49% throughput nếu bật); (3) <strong>Single-threaded inject</strong> vs concurrent users thật. Đây là setup cho proof-of-concept, không phải claim về capacity.</p>
+    </div>
+
+    <div class="context-box" style="border-left-color:#22c55e;">
+      <div class="title" style="color:#22c55e;">"Có quyết định kỹ thuật nào đáng chú ý không?"</div>
+      <ul style="margin-top:4px;">
+        <li><strong>Scala vs Python:</strong> 4.5× throughput gain trên cùng phần cứng — đo được, không phải claim</li>
+        <li><strong>Micro-batch bulkWrite:</strong> Giảm MongoDB I/O từ N round-trips xuống 1 per batch</li>
+        <li><strong>Idempotent upsert:</strong> Exactly-once semantics mà không cần distributed lock</li>
+        <li><strong>Write-aside Redis:</strong> Counter O(1) thay vì COUNT() O(n) trên collection lớn</li>
+      </ul>
+    </div>
+
+    <div class="context-box" style="border-left-color:#22c55e;">
+      <div class="title" style="color:#22c55e;">"Hệ thống có scale được không?"</div>
+      <p>Cùng kiến trúc <strong>Debezium + Kafka + Spark</strong> như Shopify (100K CDC/s), Grab (5,000+ resources), Gojek (6B events/day). Thêm Kafka partitions → thêm Spark workers → throughput tăng linear (đã có benchmark mode "partition" chứng minh). Đây là horizontal scaling — không cần thay đổi code.</p>
+    </div>
+
+    <div class="context-box" style="border-left-color:#06b6d4;">
+      <div class="title" style="color:#06b6d4;">"Tại sao chọn stack này thay vì stack khác?"</div>
+      <p>Debezium + Kafka + Spark là stack của Shopify, Grab, Traveloka — các công ty SEA cùng bài toán. Netflix tự xây DBLog vì Debezium chưa tồn tại; LinkedIn tự xây Brooklin vì không có tool phù hợp năm 2016. Năm 2024, Debezium là lựa chọn mặc định của industry cho MySQL CDC.</p>
+    </div>
+
+    <div class="context-box" style="border-left-color:#06b6d4;">
+      <div class="title" style="color:#06b6d4;">"Đơn vị đo khác nhau thì so sánh thế nào?"</div>
+      <p>Bảng quy đổi: <strong>1 order/s ≈ 7–10 CDC events/s ≈ 5–15 HTTP req/s ≈ 50+ QPS</strong>. Stripe (2,533 txn/s) đo payment events — 1:1 với orders. Shopify (967K req/s) đo HTTP requests — không phải orders. Cần quy về cùng đơn vị trước khi so sánh.</p>
+    </div>
+
+  </div>
+</section>
+
+<div class="footer">
+  Tổng hợp cho Đồ án tốt nghiệp CDC Data Pipeline · Tháng 5/2026 · 44 nguồn trích dẫn có link đầy đủ · Nguồn: Engineering blogs, SEC filings, official newsrooms
+</div>
+
+</div>
+</body>
+</html>

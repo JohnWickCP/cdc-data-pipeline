@@ -108,6 +108,9 @@ services:
       - cdc-net
     ports:
       - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -168,6 +171,7 @@ services:
       - "8080:8080"
     volumes:
       - ./jobs:/opt/spark/jobs
+      - spark_checkpoint:/tmp/spark-checkpoint
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080"]
       interval: 15s
@@ -292,6 +296,8 @@ volumes:
   zookeeper_data:
   kafka_data:
   grafana_data:
+  redis_data:
+  spark_checkpoint:
 
 networks:
   cdc-net:

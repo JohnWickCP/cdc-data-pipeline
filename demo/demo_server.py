@@ -271,21 +271,8 @@ def api_clear():
     except Exception as e:
         errors.append(f"redis: {e}")
 
-    # Snapshot current Kafka end-offsets as new base so dashboard shows 0 after clear.
-    # Actual Kafka offset (in Prometheus) is unchanged — preserves fault-tolerance story.
-    global _kafka_base
-    for metric, key in [("cdc_kafka_customers_offset", "customers"),
-                        ("cdc_kafka_orders_offset",    "orders")]:
-        try:
-            url = f"{PROM_URL}/api/v1/query?query={metric}"
-            req = urllib.request.Request(url, headers={"Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=2) as resp:
-                data = json.loads(resp.read())
-            rs = data.get("data", {}).get("result", [])
-            _kafka_base[key] = float(rs[0]["value"][1]) if rs else 0.0
-        except Exception:
-            pass
-
+    # Kafka intentionally not cleared — offset stays to show fault-tolerance:
+    # data persists in Kafka even after MySQL/Mongo/Redis are wiped.
     return jsonify({"ok": len(errors) == 0, "errors": errors})
 
 @app.route("/api/comparison")
@@ -297,6 +284,8 @@ def api_comparison():
             autocommit=True, charset="utf8mb4",
         )
         cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM customers")
+        mysql_count = cur.fetchone()[0]
         cur.execute(
             "SELECT id, name, email, phone, created_at "
             "FROM customers ORDER BY id DESC LIMIT 8"
@@ -321,9 +310,9 @@ def api_comparison():
             if doc:
                 mongo_by_id[mid] = {"id": doc["_id"], "name": doc.get("name"), "email": doc.get("email")}
 
-        return jsonify({"ok": True, "mysql": mysql_records, "mongo_by_id": mongo_by_id})
+        return jsonify({"ok": True, "mysql_count": mysql_count, "mysql": mysql_records, "mongo_by_id": mongo_by_id})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e), "mysql": [], "mongo": []})
+        return jsonify({"ok": False, "error": str(e), "mysql_count": 0, "mysql": [], "mongo": []})
 
 
 def _detect_engine() -> str:

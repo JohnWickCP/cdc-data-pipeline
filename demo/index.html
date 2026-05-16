@@ -604,7 +604,9 @@ async function refresh() {
     ]);
 
     // ── Stat cards ──
-    setTxt('sMySQL', m['cdc_mysql_customers_total']);
+    // Use direct MySQL count from /api/comparison to avoid Prometheus scrape lag
+    const mysqlCount = (cmp && cmp.ok && cmp.mysql_count != null) ? cmp.mysql_count : m['cdc_mysql_customers_total'];
+    setTxt('sMySQL', mysqlCount);
     setTxt('sMongo', mg.count);
     setTxt('sKafka', m['cdc_kafka_customers_offset']);
     setTxt('sRedis', rd.customers_total);
@@ -616,8 +618,8 @@ async function refresh() {
     const kr = m['cdc_kafka_rate_total'];
     $('sKafkaRate').textContent = kr != null ? `↑ ${kr.toFixed(1)} events/s` : '—';
 
-    // MongoDB sync bar
-    const myCnt = m['cdc_mysql_customers_total'] || 0;
+    // MongoDB sync bar — use direct MySQL count for accurate sync %
+    const myCnt = mysqlCount || 0;
     const mgCnt = mg.count || 0;
     const syncPct = myCnt > 0 ? Math.min(100, mgCnt / myCnt * 100) : 100;
     $('syncBar').style.width = `${syncPct}%`;
