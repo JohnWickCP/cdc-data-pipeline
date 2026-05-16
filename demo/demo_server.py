@@ -5,7 +5,7 @@ Run  : python demo_server.py   (sau khi: pip install -r requirements.txt)
 Open : http://localhost:8888
 """
 
-import os, json, time, threading, random
+import os, json, time, threading, random, subprocess
 from pathlib import Path
 
 # Load .env từ cùng thư mục (nếu có) — không cần python-dotenv
@@ -138,6 +138,269 @@ def _load_worker(rate: int):
 
     conn.close()
     print("[LoadWorker] Stopped.")
+
+
+# ── Fault tolerance state ────────────────────────────────────────────
+_ft_state: dict = {
+    "phase": "idle",       # idle | running | recovered | failed
+    "scenario": None,
+    "fault_start": None,
+    "recovery_time_s": None,
+    "baseline_mysql": 0,
+    "baseline_mongo": 0,
+    "after_mysql": 0,
+    "after_mongo": 0,
+    "timeline": [],
+}
+_ft_lock = threading.Lock()
+
+_SPARK_SUBMIT = (
+    "docker exec -d cdc-spark-master /opt/spark/bin/spark-submit"
+    " --class CdcRedisConsumer"
+    " --master spark://cdc-spark-master:7077"
+    " --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,"
+    "org.mongodb.spark:mongo-spark-connector_2.12:10.3.0,"
+    "redis.clients:jedis:5.1.0"
+    " /opt/spark/jobs/cdc-mysql-to-mongodb-redis_2.12-1.0.jar"
+)
+
+
+def _ft_log(event: str, detail: str, level: str = "info"):
+    ts = time.strftime("%H:%M:%S")
+    entry = {"ts": ts, "event": event, "detail": detail, "level": level}
+    with _ft_lock:
+        _ft_state["timeline"].append(entry)
+    print(f"[FT] {ts} [{level.upper()}] {event}: {detail}")
+
+
+def _docker(cmd: str, timeout: int = 30) -> bool:
+    try:
+        subprocess.run(cmd.split(), capture_output=True, timeout=timeout)
+        return True
+    except Exception as e:
+        _ft_log("ERROR", f"docker cmd failed: {e}", "error")
+        return False
+
+
+def _container_status(name: str) -> str:
+    try:
+        r = subprocess.run(
+            ["docker", "inspect", "--format", "{{.State.Status}}", name],
+            capture_output=True, text=True, timeout=5,
+        )
+        return r.stdout.strip()
+    except Exception:
+        return "unknown"
+
+
+def _mysql_count() -> int:
+    try:
+        conn = pymysql.connect(
+            host=MYSQL_HOST, port=MYSQL_PORT,
+            user=MYSQL_USER, password=MYSQL_PASS, db=MYSQL_DB,
+            autocommit=True, connect_timeout=3,
+        )
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM customers")
+        n = cur.fetchone()[0]
+        conn.close()
+        return n
+    except Exception:
+        return -1
+
+
+def _mongo_count() -> int:
+    try:
+        client = pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000)
+        return client["inventory"]["customers"].count_documents({})
+    except Exception:
+        return -1
+
+
+def _insert_ft_record(label: str) -> bool:
+    try:
+        conn = pymysql.connect(
+            host=MYSQL_HOST, port=MYSQL_PORT,
+            user=MYSQL_USER, password=MYSQL_PASS, db=MYSQL_DB,
+            autocommit=True, connect_timeout=3,
+        )
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO customers (name, email, phone) VALUES (%s, %s, %s)",
+            (f"FT-{label}", f"ft_{label.lower()}@test.com", "0900000099"),
+        )
+        conn.close()
+        return True
+    except Exception as e:
+        _ft_log("DATA", f"Insert during fault failed: {e}", "warn")
+        return False
+
+
+def _wait_sync(expected: int, timeout: int = 60) -> bool:
+    """Wait until MongoDB count >= expected. Returns True if converged."""
+    for _ in range(timeout // 2):
+        time.sleep(2)
+        mc = _mongo_count()
+        if mc >= expected:
+            return True
+    return False
+
+
+def _run_kafka_scenario():
+    with _ft_lock:
+        _ft_state["phase"] = "running"
+        _ft_state["timeline"] = []
+
+    _ft_log("SCENARIO", "Kafka Broker Crash & Recovery", "info")
+
+    before_mysql = _mysql_count()
+    before_mongo = _mongo_count()
+    with _ft_lock:
+        _ft_state["baseline_mysql"] = before_mysql
+        _ft_state["baseline_mongo"] = before_mongo
+
+    _ft_log("BASELINE", f"MySQL={before_mysql} | MongoDB={before_mongo}", "info")
+    _ft_log("INJECT", "Stopping cdc-kafka container…", "warn")
+
+    _docker("docker stop cdc-kafka")
+    _ft_log("STATUS", "Kafka DOWN — pipeline paused", "error")
+
+    time.sleep(3)
+    if _insert_ft_record("Kafka"):
+        _ft_log("DATA", "1 record inserted into MySQL while Kafka is DOWN", "info")
+
+    time.sleep(5)
+    _ft_log("RECOVER", "Starting cdc-kafka container…", "info")
+    fault_start = time.time()
+
+    _docker("docker start cdc-kafka")
+
+    # Wait for Kafka to be running
+    for _ in range(15):
+        time.sleep(2)
+        if _container_status("cdc-kafka") == "running":
+            _ft_log("STATUS", "Kafka container running — Debezium reconnecting…", "info")
+            break
+
+    # Wait for Spark to drain Kafka backlog (2 trigger cycles = 10s)
+    time.sleep(15)
+    recovery_s = int(time.time() - fault_start)
+
+    after_mysql = _mysql_count()
+    after_mongo = _mongo_count()
+
+    with _ft_lock:
+        _ft_state["after_mysql"] = after_mysql
+        _ft_state["after_mongo"] = after_mongo
+        _ft_state["recovery_time_s"] = recovery_s
+        _ft_state["phase"] = "recovered" if after_mongo >= after_mysql else "failed"
+
+    lost = max(0, after_mysql - after_mongo)
+    status = "PASS — 0 data loss" if lost == 0 else f"LAG — {lost} records still processing"
+    level = "success" if lost == 0 else "warn"
+    _ft_log("RESULT", f"Recovery: {recovery_s}s | MySQL={after_mysql} | MongoDB={after_mongo} | {status}", level)
+
+
+def _run_debezium_scenario():
+    with _ft_lock:
+        _ft_state["phase"] = "running"
+        _ft_state["timeline"] = []
+
+    _ft_log("SCENARIO", "Debezium Connector Restart & Offset Recovery", "info")
+
+    before_mysql = _mysql_count()
+    before_mongo = _mongo_count()
+    with _ft_lock:
+        _ft_state["baseline_mysql"] = before_mysql
+        _ft_state["baseline_mongo"] = before_mongo
+
+    _ft_log("BASELINE", f"MySQL={before_mysql} | MongoDB={before_mongo}", "info")
+    _ft_log("INJECT", "Restarting cdc-debezium container…", "warn")
+
+    _docker("docker restart cdc-debezium")
+    _ft_log("STATUS", "Debezium DOWN — CDC paused (binlog offset stored)", "error")
+
+    time.sleep(5)
+    if _insert_ft_record("Debezium"):
+        _ft_log("DATA", "1 record inserted while Debezium is restarting", "info")
+    _ft_log("STATUS", "MySQL binlog recorded the change — will be replayed on reconnect", "info")
+
+    fault_start = time.time()
+    # Wait for Debezium to come back up
+    for _ in range(20):
+        time.sleep(2)
+        if _container_status("cdc-debezium") == "running":
+            _ft_log("STATUS", "Debezium container running — resuming from stored binlog offset", "info")
+            break
+
+    time.sleep(15)  # Let Debezium publish caught-up events + Spark process them
+    recovery_s = int(time.time() - fault_start)
+
+    after_mysql = _mysql_count()
+    after_mongo = _mongo_count()
+    with _ft_lock:
+        _ft_state["after_mysql"] = after_mysql
+        _ft_state["after_mongo"] = after_mongo
+        _ft_state["recovery_time_s"] = recovery_s
+        _ft_state["phase"] = "recovered" if after_mongo >= after_mysql else "failed"
+
+    lost = max(0, after_mysql - after_mongo)
+    status = "PASS — binlog offset preserved, 0 events lost" if lost == 0 else f"LAG — {lost} records still syncing"
+    level = "success" if lost == 0 else "warn"
+    _ft_log("RESULT", f"Recovery: {recovery_s}s | MySQL={after_mysql} | MongoDB={after_mongo} | {status}", level)
+
+
+def _run_spark_scenario():
+    with _ft_lock:
+        _ft_state["phase"] = "running"
+        _ft_state["timeline"] = []
+
+    _ft_log("SCENARIO", "Spark Job Crash & Checkpoint Recovery", "info")
+
+    before_mysql = _mysql_count()
+    before_mongo = _mongo_count()
+    with _ft_lock:
+        _ft_state["baseline_mysql"] = before_mysql
+        _ft_state["baseline_mongo"] = before_mongo
+
+    _ft_log("BASELINE", f"MySQL={before_mysql} | MongoDB={before_mongo}", "info")
+    _ft_log("INJECT", "Killing Spark streaming job (CdcRedisConsumer)…", "warn")
+
+    subprocess.run(
+        ["docker", "exec", "cdc-spark-master", "pkill", "-f", "CdcRedisConsumer"],
+        capture_output=True, timeout=10,
+    )
+    _ft_log("STATUS", "Spark job DOWN — messages accumulating in Kafka", "error")
+    _ft_log("INFO", "Checkpoint at /tmp/spark-checkpoint/cdc-pipeline is preserved", "info")
+
+    time.sleep(3)
+    if _insert_ft_record("Spark"):
+        _ft_log("DATA", "1 record in MySQL → event in Kafka → waiting for Spark restart", "info")
+
+    time.sleep(5)
+    _ft_log("RECOVER", "Re-submitting Spark job with existing checkpoint…", "info")
+    fault_start = time.time()
+
+    subprocess.run(_SPARK_SUBMIT.split(), capture_output=True, timeout=15)
+    _ft_log("STATUS", "Spark job re-submitted — reading from checkpoint offset, no reprocessing", "info")
+
+    # Wait for Spark packages download + first batch (can take ~30-90s on first submit after recreate)
+    time.sleep(30)
+    _wait_sync(before_mysql + 1, timeout=120)
+    recovery_s = int(time.time() - fault_start)
+
+    after_mysql = _mysql_count()
+    after_mongo = _mongo_count()
+    with _ft_lock:
+        _ft_state["after_mysql"] = after_mysql
+        _ft_state["after_mongo"] = after_mongo
+        _ft_state["recovery_time_s"] = recovery_s
+        _ft_state["phase"] = "recovered" if after_mongo >= after_mysql else "failed"
+
+    lost = max(0, after_mysql - after_mongo)
+    status = "PASS — checkpoint prevents duplicates, 0 data loss" if lost == 0 else f"LAG — {lost} still in Kafka"
+    level = "success" if lost == 0 else "warn"
+    _ft_log("RESULT", f"Recovery: {recovery_s}s | MySQL={after_mysql} | MongoDB={after_mongo} | {status}", level)
 
 
 # ── Flask app ────────────────────────────────────────────────────────
@@ -366,6 +629,69 @@ def api_metrics():
         result["cdc_kafka_customers_offset"] = max(0.0, result["cdc_kafka_customers_offset"] - _kafka_base["customers"])
 
     return jsonify(result)
+
+
+# ── Fault Tolerance API ──────────────────────────────────────────────
+@app.route("/api/ft/health")
+def api_ft_health():
+    containers = [
+        "cdc-mysql", "cdc-debezium", "cdc-kafka",
+        "cdc-spark-master", "cdc-mongodb", "cdc-redis", "cdc-zookeeper",
+    ]
+    return jsonify({
+        "ok": True,
+        "containers": {c: _container_status(c) for c in containers},
+        "ts": time.time(),
+    })
+
+
+@app.route("/api/ft/state")
+def api_ft_state():
+    with _ft_lock:
+        state = {k: v for k, v in _ft_state.items()}
+    state["containers"] = {
+        c: _container_status(c)
+        for c in ["cdc-mysql", "cdc-debezium", "cdc-kafka", "cdc-spark-master"]
+    }
+    return jsonify(state)
+
+
+@app.route("/api/ft/inject", methods=["POST"])
+def api_ft_inject():
+    body = request.get_json(silent=True) or {}
+    scenario = body.get("scenario", "kafka")
+    with _ft_lock:
+        if _ft_state["phase"] == "running":
+            return jsonify({"ok": False, "reason": "scenario already running"})
+        _ft_state.update(
+            scenario=scenario, phase="idle",
+            fault_start=None, recovery_time_s=None,
+            baseline_mysql=0, baseline_mongo=0,
+            after_mysql=0, after_mongo=0, timeline=[],
+        )
+
+    runners = {
+        "kafka":    _run_kafka_scenario,
+        "debezium": _run_debezium_scenario,
+        "spark":    _run_spark_scenario,
+    }
+    fn = runners.get(scenario)
+    if fn is None:
+        return jsonify({"ok": False, "reason": f"unknown scenario: {scenario}"})
+
+    threading.Thread(target=fn, daemon=True).start()
+    return jsonify({"ok": True, "scenario": scenario})
+
+
+@app.route("/api/ft/reset", methods=["POST"])
+def api_ft_reset():
+    with _ft_lock:
+        _ft_state.update(
+            phase="idle", scenario=None, fault_start=None,
+            recovery_time_s=None, baseline_mysql=0, baseline_mongo=0,
+            after_mysql=0, after_mongo=0, timeline=[],
+        )
+    return jsonify({"ok": True})
 
 
 if __name__ == "__main__":

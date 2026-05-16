@@ -1,0 +1,97 @@
+# Kafka 3-broker cluster override — dùng cho VM với cấu hình lớn hơn
+# Usage: docker compose -f ../docker-compose.yml -f docker-compose.kafka-cluster.yml up -d
+#
+# Yêu cầu VM: >= 8 core, >= 16GB RAM
+# Mục đích: demo replication.factor=3, ISR failover, kill 1 broker không mất data
+
+version: '3.8'
+
+services:
+
+  # ── Override broker 1 (giữ tên cdc-kafka) ───────────────────────────
+  kafka:
+    container_name: cdc-kafka
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: cdc-zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://cdc-kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_DEFAULT_REPLICATION_FACTOR: '3'
+      KAFKA_MIN_INSYNC_REPLICAS: '2'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: '3'
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: '3'
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: '2'
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    volumes:
+      - kafka1-data:/var/lib/kafka/data
+
+  # ── Broker 2 ────────────────────────────────────────────────────────
+  kafka-2:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: cdc-kafka-2
+    depends_on: [zookeeper]
+    ports:
+      - "29093:29093"
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: cdc-zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://cdc-kafka-2:9092,PLAINTEXT_HOST://localhost:29093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_DEFAULT_REPLICATION_FACTOR: '3'
+      KAFKA_MIN_INSYNC_REPLICAS: '2'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: '3'
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    volumes:
+      - kafka2-data:/var/lib/kafka/data
+    networks:
+      - cdc-net
+
+  # ── Broker 3 ────────────────────────────────────────────────────────
+  kafka-3:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: cdc-kafka-3
+    depends_on: [zookeeper]
+    ports:
+      - "29094:29094"
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_ZOOKEEPER_CONNECT: cdc-zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://cdc-kafka-3:9092,PLAINTEXT_HOST://localhost:29094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_DEFAULT_REPLICATION_FACTOR: '3'
+      KAFKA_MIN_INSYNC_REPLICAS: '2'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: '3'
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    volumes:
+      - kafka3-data:/var/lib/kafka/data
+    networks:
+      - cdc-net
+
+  # ── Update Debezium bootstrap servers ───────────────────────────────
+  debezium:
+    container_name: cdc-debezium
+    environment:
+      BOOTSTRAP_SERVERS: cdc-kafka:9092,cdc-kafka-2:9092,cdc-kafka-3:9092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: connect-configs
+      OFFSET_STORAGE_TOPIC: connect-offsets
+      STATUS_STORAGE_TOPIC: connect-statuses
+      CONFIG_STORAGE_REPLICATION_FACTOR: '3'
+      OFFSET_STORAGE_REPLICATION_FACTOR: '3'
+      STATUS_STORAGE_REPLICATION_FACTOR: '3'
+
+volumes:
+  kafka1-data:
+  kafka2-data:
+  kafka3-data:
+
+networks:
+  cdc-net:
+    external: true
+    name: cdc-data-pipeline_cdc-net
