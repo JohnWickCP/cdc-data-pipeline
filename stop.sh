@@ -6,7 +6,7 @@
 # ============================================================
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-COMPOSE_DIR="$PROJECT_DIR/pipeline"
+COMPOSE_DIR="$PROJECT_DIR"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -49,6 +49,6 @@ fi
 echo ""
 echo -e "${BOLD}============================================${NC}"
 echo -e "  ${GREEN}✓ Pipeline đã dừng${NC}"
-echo -e "  ${CYAN}Khởi động: bash start_full_pipeline.sh${NC}"
+echo -e "  ${CYAN}Khởi động: bash start.sh${NC}"
 echo -e "${BOLD}============================================${NC}"
 echo ""

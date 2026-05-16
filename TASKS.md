@@ -122,3 +122,6 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 | 2026-05-07 | Phase 3: demo dashboard (nhấn nút, real-time), Grafana real-time panels, benchmark history + compare |
 | 2026-05-07 | Phase 3 tiếp: 3.6 orders injection vào demo, 3.7 Grafana alert rules, 3.3 Scala vs Python so sánh xong |
 | 2026-05-07 | Benchmark fixes: drain condition bug (target_mongo=before+delta), max_e2e_tps khi bottleneck, detect_spark_engine(), Engine column trong compare_runs.py, Windows UTF-8 fix |
+| 2026-05-16 | Fix start.sh: sửa path connector.json sai (../demo → demo/config), sửa run_bench.sh: bỏ -t flag TTY |
+| 2026-05-16 | Chạy lại toàn bộ hệ thống: 43/43 PASS, benchmark mới: max 404.3 rec/s, sustained 273.3 rec/s |
+| 2026-05-16 | Tạo docs/BENCHMARK_RESULTS.md, cập nhật README.md với kết quả mới |

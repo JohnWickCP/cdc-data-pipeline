@@ -19,13 +19,12 @@ __pycache__/
 *.egg-info/
 venv/
 env/
-# Active .env (có thể chứa thông tin nhạy cảm khi deploy thật)
-# Pipeline profiles (.env.laptop, .env.server, .env.vm) vẫn được commit
-pipeline/.env
+# Active .env (generated at runtime from profile files — không commit)
+.env
 monitoring/exporter/.env
-!pipeline/.env.laptop
-!pipeline/.env.server
-!pipeline/.env.vm
+!.env.laptop
+!.env.server
+!.env.vm
 !monitoring/exporter/.env.example
 jobs/scala/target/
 jobs/scala/project/target/

@@ -1,3 +1,5 @@
+name: pipeline
+
 version: '3.8'
 
 services:
@@ -41,7 +43,6 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      # ── Tài nguyên theo phần cứng (cấu hình trong pipeline/.env) ──
       KAFKA_HEAP_OPTS: "${KAFKA_HEAP_OPTS:--Xmx1g -Xms512m}"
       KAFKA_NUM_PARTITIONS: "${KAFKA_NUM_PARTITIONS:-1}"
     volumes:
@@ -64,7 +65,6 @@ services:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: inventory
       MYSQL_ROOT_HOST: "%"
-      # ── Tài nguyên theo phần cứng ──
       MYSQL_INNODB_BUFFER_POOL_SIZE: "${MYSQL_INNODB_BUFFER_POOL_SIZE:-512M}"
     command:
       - --server-id=1
@@ -76,7 +76,7 @@ services:
       - --innodb-buffer-pool-size=${MYSQL_INNODB_BUFFER_POOL_SIZE:-536870912}
     volumes:
       - mysql_data:/var/lib/mysql
-      - ../demo/config/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./demo/config/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
       interval: 10s
@@ -91,7 +91,6 @@ services:
       - cdc-net
     ports:
       - "27017:27017"
-    # ── WiredTiger cache theo phần cứng ──
     command: ["mongod", "--wiredTigerCacheSizeGB", "${MONGO_CACHE_SIZE_GB:-1}"]
     volumes:
       - mongodb_data:/data/db
@@ -139,7 +138,6 @@ services:
       KEY_CONVERTER_SCHEMAS_ENABLE: "false"
       VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
       OFFSET_FLUSH_INTERVAL_MS: 5000
-      # ── Tài nguyên theo phần cứng ──
       KAFKA_HEAP_OPTS: "${CONNECT_HEAP:--Xmx512m -Xms256m}"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8083/connectors"]
@@ -151,7 +149,7 @@ services:
   spark-master:
     image: cdc-spark:3.5.0
     build:
-      context: ../spark
+      context: ./spark
       dockerfile: Dockerfile
     container_name: cdc-spark-master
     networks:
@@ -169,7 +167,7 @@ services:
       - "7077:7077"
       - "8080:8080"
     volumes:
-      - ../jobs:/opt/spark/jobs
+      - ./jobs:/opt/spark/jobs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080"]
       interval: 15s
@@ -180,7 +178,7 @@ services:
   spark-worker-1:
     image: cdc-spark:3.5.0
     build:
-      context: ../spark
+      context: ./spark
       dockerfile: Dockerfile
     container_name: cdc-spark-worker-1
     networks:
@@ -193,8 +191,7 @@ services:
     ports:
       - "8081:8081"
     volumes:
-      - ../jobs:/opt/spark/jobs
-    # ── Tài nguyên theo phần cứng (cấu hình trong pipeline/.env) ──
+      - ./jobs:/opt/spark/jobs
     environment:
       SPARK_WORKER_CORES: "${SPARK_WORKER_CORES:-4}"
       SPARK_WORKER_MEMORY: "${SPARK_WORKER_MEMORY:-2g}"
@@ -202,7 +199,7 @@ services:
   spark-worker-2:
     image: cdc-spark:3.5.0
     build:
-      context: ../spark
+      context: ./spark
       dockerfile: Dockerfile
     container_name: cdc-spark-worker-2
     networks:
@@ -215,16 +212,15 @@ services:
     ports:
       - "8082:8081"
     volumes:
-      - ../jobs:/opt/spark/jobs
+      - ./jobs:/opt/spark/jobs
     environment:
       SPARK_WORKER_CORES: "${SPARK_WORKER_CORES:-4}"
       SPARK_WORKER_MEMORY: "${SPARK_WORKER_MEMORY:-2g}"
 
-
   spark-worker-3:
     image: cdc-spark:3.5.0
     build:
-      context: ../spark
+      context: ./spark
       dockerfile: Dockerfile
     container_name: cdc-spark-worker-3
     networks:
@@ -237,20 +233,21 @@ services:
     ports:
       - "8085:8081"
     volumes:
-      - ../jobs:/opt/spark/jobs
+      - ./jobs:/opt/spark/jobs
     environment:
       SPARK_WORKER_CORES: "${SPARK_WORKER_CORES:-4}"
       SPARK_WORKER_MEMORY: "${SPARK_WORKER_MEMORY:-2g}"
+
   metrics-exporter:
     build:
-      context: ../monitoring/exporter
+      context: ./monitoring/exporter
       dockerfile: Dockerfile
     container_name: cdc-metrics-exporter
-    env_file: ../monitoring/exporter/.env
+    env_file: ./monitoring/exporter/.env
     environment:
       - BENCHMARK_DIR=/app/benchmark
     volumes:
-      - ../benchmark:/app/benchmark
+      - ./benchmark:/app/benchmark
     networks:
       - cdc-net
     ports:
@@ -269,7 +266,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -284,8 +281,8 @@ services:
       - "3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
-      - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ../monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
 

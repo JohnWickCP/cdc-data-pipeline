@@ -12,7 +12,7 @@ set -e
 export MSYS_NO_PATHCONV=1
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-COMPOSE_DIR="$PROJECT_DIR/pipeline"
+COMPOSE_DIR="$PROJECT_DIR"
 
 # Tìm Python interpreter — dùng --version để test thật, tránh Windows Store stub
 # (python3 trên Windows có thể là stub redirect tới Microsoft Store, không chạy được)
@@ -129,6 +129,31 @@ for arg in "$@"; do
         --spark-workers=*) OVR_SPARK_WORKERS="${arg#--spark-workers=}" ;;
         --spark-memory=*)  OVR_SPARK_MEMORY="${arg#--spark-memory=}" ;;
         --spark-cores=*)   OVR_SPARK_CORES="${arg#--spark-cores=}" ;;
+        --detect)
+            _profile=$(auto_detect_profile)
+            _os=$(uname -s 2>/dev/null || echo "unknown")
+            _ram=0
+            case "$_os" in
+                MINGW*|MSYS*|CYGWIN*)
+                    _bytes=$(wmic computersystem get TotalPhysicalMemory /value 2>/dev/null \
+                        | tr -d '\r' | grep "^TotalPhysicalMemory=" | cut -d= -f2 | xargs)
+                    [[ "$_bytes" =~ ^[0-9]+$ ]] && _ram=$(( _bytes / 1024 / 1024 / 1024 )) ;;
+                Linux*)
+                    _mb=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}' || echo "0")
+                    _ram=$(( _mb / 1024 )) ;;
+            esac
+            echo ""
+            echo "  RAM detected : ${_ram}GB"
+            echo "  Profile      : $_profile"
+            echo ""
+            echo "  Profiles:"
+            echo "    laptop  — 12-16GB RAM, Spark 3 workers × 2g"
+            echo "    server  — 32GB+ RAM,   Spark 6 workers × 4g"
+            echo "    vm      — cloud/VM,    Spark 6 workers × 4g"
+            echo ""
+            echo "  Khởi động: bash start.sh --profile=$_profile"
+            echo ""
+            exit 0 ;;
         --help|-h)
             echo "Usage: bash start.sh [OPTIONS]"
             echo ""
@@ -138,6 +163,7 @@ for arg in "$@"; do
             echo ""
             echo "Profile phần cứng:"
             echo "  --profile=NAME         laptop | server | vm"
+            echo "  --detect               Hiển thị hardware info + profile gợi ý"
             echo "  (không truyền)         Tự động detect từ phần cứng"
             echo ""
             echo "Override tham số (áp dụng sau khi load profile):"
@@ -149,11 +175,10 @@ for arg in "$@"; do
             echo ""
             echo "Ví dụ:"
             echo "  bash start.sh"
+            echo "  bash start.sh --detect"
             echo "  bash start.sh --profile=server"
             echo "  bash start.sh --profile=laptop --partitions=3 --spark-memory=6g"
             echo "  bash start.sh --python --spark-cores=3"
-            echo ""
-            echo "Xem detect_hardware.sh để biết cấu hình phù hợp với máy."
             exit 0 ;;
         *)
             echo "Flag không nhận ra: $arg  (dùng --help để xem usage)"
@@ -367,13 +392,13 @@ if echo "$EXISTING" | grep -q "mysql-inventory-connector"; then
         sleep 3
         curl -sf -X POST http://localhost:8083/connectors \
             -H "Content-Type: application/json" \
-            -d @"../demo/config/connector.json" > /dev/null 2>&1 || true
+            -d @"$PROJECT_DIR/demo/config/connector.json" > /dev/null 2>&1 || true
         log "Connector đã tạo lại"
     fi
 else
     curl -sf -X POST http://localhost:8083/connectors \
         -H "Content-Type: application/json" \
-        -d @"../demo/config/connector.json" > /dev/null 2>&1 || true
+        -d @"$PROJECT_DIR/demo/config/connector.json" > /dev/null 2>&1 || true
     log "Connector đã đăng ký mới"
 fi
 
@@ -568,6 +593,6 @@ echo "  Metrics:       http://localhost:8000/metrics"
 echo ""
 echo -e "${BOLD}============================================${NC}"
 echo -e "  ${GREEN}✓ Pipeline đã sẵn sàng!${NC}"
-echo -e "  ${CYAN}Dừng: bash stop_pipeline.sh${NC}"
+echo -e "  ${CYAN}Dừng: bash stop.sh${NC}"
 echo -e "${BOLD}============================================${NC}"
 echo ""
