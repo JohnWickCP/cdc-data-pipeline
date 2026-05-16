@@ -198,14 +198,15 @@ def process_batch(batch_df, batch_id):
 
                 if op == "d":
                     pipe.delete(key)
+                    pipe.decr("customers:total")
                 else:
                     pipe.hset(key, mapping={
                         "id": str(id_val),
                         "name": row["name"] or "",
                         "email": row["masked_email"] or ""
                     })
-
-                pipe.incr("customers:total")
+                    if op in ("c", "r"):
+                        pipe.incr("customers:total")
 
             elif table == "orders":
 

@@ -88,6 +88,9 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 | 4.1 | Mount Spark checkpoint ra host volume (thoát khỏi /tmp) | High | ✅ | `docker-compose.yml`: thêm volume `spark_checkpoint` mount vào `spark-master:/tmp/spark-checkpoint`. Checkpoint tồn tại qua container restart. |
 | 4.2 | Bật Redis AOF persistence | Medium | ✅ | `docker-compose.yml`: thêm `command: redis-server --appendonly yes` + volume `redis_data:/data`. Redis crash → restart không mất data. |
 | 4.3 | Redis counter INCR idempotent khi Spark reprocess | Low | ❌ | Spark reprocess 1 INSERT event (do crash) → `INCR customers:total` chạy 2 lần → counter sai. Fix: check event đã xử lý chưa trước khi INCR (Lua script hoặc Redis SET với NX flag để track processed event IDs) |
+| 4.4 | Fix Python fallback: `customers:total` sai khi DELETE | High | ✅ | `cdc_pipeline.py`: chuyển `pipe.incr` vào trong else block + gate op=c\|r, thêm `pipe.decr` khi op=d. Mirror đúng logic Scala JAR. |
+| 4.5 | start.sh Kafka topics timeout → warn thay vì exit 1 | Medium | ✅ | `start.sh`: đổi `exit 1` thành `warn + break` để startup không fail khi Debezium tạo topics chậm. |
+| 4.6 | metrics_exporter.py: bỏ MySQL connection thứ 2 trong check_pipeline_health | Low | ✅ | `metrics_exporter.py`: `collect_mysql()` trả về tuple (ok, c_count, o_count), truyền vào `check_pipeline_health()` thay vì mở lại connection. |
 
 **Không fix (intentional):** Kafka multi-broker — thêm 2 broker nữa tốn quá nhiều RAM (không đủ trên laptop 16GB). Đây là known limitation đã document ở README section 8.2.
 
@@ -140,3 +143,4 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 | 2026-05-16 | Docs: tách AI_GUIDE.md, cập nhật VM_SETUP.md, tạo DEFENSE_QA.md + PRESENTATION_SCRIPT.md (gitignored), thêm Phase 4 fault tolerance tasks |
 | 2026-05-16 | Phase 4.1+4.2: thêm spark_checkpoint volume (driver recovery) + Redis AOF persistence vào docker-compose.yml |
 | 2026-05-16 | Demo fixes: api_comparison trả mysql_count trực tiếp, index.html dùng mysql_count thay Prometheus để tránh scrape lag |
+| 2026-05-17 | Error handling review + fixes: Python fallback customers:total bug (4.4), start.sh Kafka timeout (4.5), metrics_exporter double MySQL connection (4.6) |

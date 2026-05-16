@@ -418,7 +418,10 @@ for i in $(seq 1 40); do
         log "Kafka topics sẵn sàng: customers ✓  orders ✓"
         break
     fi
-    [ $i -eq 40 ] && { err "Kafka topics timeout"; exit 1; }
+    if [ $i -eq 40 ]; then
+        warn "Kafka topics timeout — Debezium có thể vẫn đang khởi động. Tiếp tục..."
+        break
+    fi
     sleep 3
 done
 
@@ -448,6 +451,7 @@ if [ "$ACTIVE_APPS" -gt 0 ]; then
     log "Spark cluster restart xong"
 fi
 
+docker exec --user root cdc-spark-master chmod 777 /tmp/spark-checkpoint 2>/dev/null || true
 docker exec cdc-spark-master rm -rf /tmp/spark-checkpoint/cdc-pipeline 2>/dev/null || true
 log "Đã xóa Spark checkpoint"
 

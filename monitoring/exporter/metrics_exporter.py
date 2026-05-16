@@ -236,14 +236,15 @@ def collect_mysql():
         mysql_customers.set(c_count)
 
         cur.execute("SELECT COUNT(*) FROM orders")
-        mysql_orders.set(cur.fetchone()[0])
+        o_count = cur.fetchone()[0]
+        mysql_orders.set(o_count)
 
         conn.close()
-        return True, c_count
+        return True, c_count, o_count
 
     except Exception as e:
         print(f"[MySQL ERROR] {e}")
-        return False, 0
+        return False, 0, 0
 
 
 def collect_mongo():
@@ -410,7 +411,7 @@ def collect_benchmark():
         print(f"[TPS Benchmark ERROR] {e}")
 
 
-def check_pipeline_health(mysql_ok, mongo_mc, mongo_mo):
+def check_pipeline_health(mysql_ok, mysql_mc, mysql_mo, mongo_mc, mongo_mo):
 
     try:
 
@@ -419,20 +420,8 @@ def check_pipeline_health(mysql_ok, mongo_mc, mongo_mo):
         else:
             pipeline_up.set(0)
 
-        if mongo_mc is not None:
-
-            conn = pymysql.connect(**MYSQL_CONFIG)
-            cur = conn.cursor()
-
-            cur.execute("SELECT COUNT(*) FROM customers")
-            mc = cur.fetchone()[0]
-
-            cur.execute("SELECT COUNT(*) FROM orders")
-            mo = cur.fetchone()[0]
-
-            conn.close()
-
-            in_sync = 1 if (mc == mongo_mc and mo == mongo_mo) else 0
+        if mongo_mc is not None and mysql_mc is not None:
+            in_sync = 1 if (mysql_mc == mongo_mc and mysql_mo == mongo_mo) else 0
             mysql_mongo_in_sync.set(in_sync)
 
     except Exception as e:
@@ -459,7 +448,7 @@ if __name__ == "__main__":
 
         try:
 
-            mysql_ok, cur_mysql_c = collect_mysql()
+            mysql_ok, cur_mysql_c, cur_mysql_o = collect_mysql()
 
             mongo_mc, mongo_mo = collect_mongo()
 
@@ -471,7 +460,7 @@ if __name__ == "__main__":
 
             collect_benchmark()
 
-            check_pipeline_health(mysql_ok, mongo_mc, mongo_mo)
+            check_pipeline_health(mysql_ok, cur_mysql_c, cur_mysql_o, mongo_mc, mongo_mo)
 
             # ── Tính rate metrics ──────────────────────────────
             now = time.time()
