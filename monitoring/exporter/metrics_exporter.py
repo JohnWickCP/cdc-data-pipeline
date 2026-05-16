@@ -192,6 +192,11 @@ lag_total = Gauge(
     "Record lag: MySQL customers - MongoDB customers"
 )
 
+kafka_consumer_lag = Gauge(
+    "cdc_kafka_consumer_lag",
+    "Kafka lag: total end offset - total MongoDB records (proxy for unprocessed events)"
+)
+
 spark_batch_duration_ms = Gauge(
     "cdc_spark_batch_duration_ms",
     "Spark batch duration ms (triggerExecution from StreamingQueryListener via Redis)"
@@ -216,6 +221,7 @@ _rate_state = {
     "ts":          0.0,
     "mysql_c":     0,
     "mongo_c":     0,
+    "mongo_o":     0,
     "kafka_total": 0,
 }
 
@@ -388,8 +394,12 @@ def collect_benchmark():
             sus = data.get("sustained") or {}
             if "spark_batch_avg_ms" in sus:
                 bench_latency_avg.set(sus["spark_batch_avg_ms"] / 1000.0)
+            if "spark_batch_p50_ms" in sus:
+                bench_latency_p50.set(sus["spark_batch_p50_ms"] / 1000.0)
             if "spark_batch_p95_ms" in sus:
                 bench_latency_p95.set(sus["spark_batch_p95_ms"] / 1000.0)
+            if "spark_batch_p99_ms" in sus:
+                bench_latency_p99.set(sus["spark_batch_p99_ms"] / 1000.0)
                 
             cfg = data.get("config") or {}
             bench_kafka_partitions.set(cfg.get("kafka_partitions") or 0)
@@ -474,10 +484,19 @@ if __name__ == "__main__":
                     mongo_write_rate.set(max(0.0, (cur_mongo_c - _rate_state["mongo_c"]) / elapsed))
                     kafka_rate_total.set(max(0.0, (cur_kafka_total - _rate_state["kafka_total"]) / elapsed))
                     lag_total.set(max(0, cur_mysql_c - (mongo_mc if mongo_mc is not None else 0)))
+                    # Kafka consumer lag (delta-based): Kafka events arriving faster than MongoDB writes
+                    # in this polling window. Shows backpressure; 0 at idle.
+                    if kafka_ok and mongo_mc is not None:
+                        kafka_delta = cur_kafka_total - _rate_state["kafka_total"]
+                        cur_mongo_total = (mongo_mc or 0) + (mongo_mo or 0)
+                        prev_mongo_total = _rate_state["mongo_c"] + _rate_state["mongo_o"]
+                        mongo_delta = cur_mongo_total - prev_mongo_total
+                        kafka_consumer_lag.set(max(0, kafka_delta - mongo_delta))
 
             _rate_state["ts"]          = now
             _rate_state["mysql_c"]     = cur_mysql_c
             _rate_state["mongo_c"]     = mongo_mc if mongo_mc is not None else 0
+            _rate_state["mongo_o"]     = mongo_mo if mongo_mo is not None else 0
             _rate_state["kafka_total"] = cur_kafka_total
             # ───────────────────────────────────────────────────
 

@@ -268,6 +268,8 @@ RUNNING=$(docker compose ps --status running -q 2>/dev/null | wc -l)
 
 if [ "$RUNNING" -gt 0 ]; then
     warn "Phát hiện $RUNNING containers đang chạy"
+    info "Đảm bảo tất cả services đang chạy..."
+    docker compose up -d 2>&1 | tail -5
     info "Restart Spark cluster để giải phóng resource..."
     docker compose restart spark-master spark-worker-1 spark-worker-2 spark-worker-3 2>&1 | tail -3
     sleep 10
