@@ -81,6 +81,18 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 
 ---
 
+## Phase 4 — Fault Tolerance Improvements
+
+| # | Task | Priority | Trạng thái | Ghi chú |
+|---|---|---|---|---|
+| 4.1 | Mount Spark checkpoint ra host volume (thoát khỏi /tmp) | High | ❌ | Sửa `docker-compose.yml`: thêm volume `spark_checkpoint` mount vào `/tmp/spark-checkpoint`. Hiện tại `/tmp` trong container bị xóa khi `stop -v` |
+| 4.2 | Bật Redis AOF persistence | Medium | ❌ | Thêm `command: redis-server --appendonly yes` vào Redis trong `docker-compose.yml`. 1 dòng. Hiện tại Redis crash = mất toàn bộ cache |
+| 4.3 | Redis counter INCR idempotent khi Spark reprocess | Low | ❌ | Spark reprocess 1 INSERT event (do crash) → `INCR customers:total` chạy 2 lần → counter sai. Fix: check event đã xử lý chưa trước khi INCR (Lua script hoặc Redis SET với NX flag để track processed event IDs) |
+
+**Không fix (intentional):** Kafka multi-broker — thêm 2 broker nữa tốn quá nhiều RAM (không đủ trên laptop 16GB). Đây là known limitation đã document ở README section 8.2.
+
+---
+
 ## Đã hoàn thành (tham khảo)
 
 | Item | Ngày | Ghi chú |
@@ -125,3 +137,4 @@ Mục tiêu: xác nhận từng tính năng hoạt động đúng trước khi s
 | 2026-05-16 | Fix start.sh: sửa path connector.json sai (../demo → demo/config), sửa run_bench.sh: bỏ -t flag TTY |
 | 2026-05-16 | Chạy lại toàn bộ hệ thống: 43/43 PASS, benchmark mới: max 404.3 rec/s, sustained 273.3 rec/s |
 | 2026-05-16 | Tạo docs/BENCHMARK_RESULTS.md, cập nhật README.md với kết quả mới |
+| 2026-05-16 | Docs: tách AI_GUIDE.md, cập nhật VM_SETUP.md, tạo DEFENSE_QA.md + PRESENTATION_SCRIPT.md (gitignored), thêm Phase 4 fault tolerance tasks |

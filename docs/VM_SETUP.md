@@ -1,6 +1,7 @@
-# Deploy CDC Pipeline lên VM thuê
+# Deploy CDC Pipeline lên Cloud VM
 
-Hướng dẫn chạy pipeline trên VM cloud (AWS EC2, GCP, Azure, DigitalOcean, Vultr...) để benchmark scale thực tế.
+Hướng dẫn từng bước để chạy pipeline trên VM cloud Linux (Ubuntu 22.04).
+Áp dụng cho: AWS EC2, GCP Compute Engine, DigitalOcean Droplet, Vultr, Azure VM.
 
 ---
 
@@ -42,99 +43,111 @@ sudo apt update && sudo apt upgrade -y
 ### 2. Cài Docker + Docker Compose
 
 ```bash
-# Docker
+# Cài Docker Engine (script chính thức)
 curl -fsSL https://get.docker.com | sudo sh
 
-# Thêm user vào group docker (để không cần sudo)
+# Thêm user vào group docker (để không cần sudo mỗi lần)
 sudo usermod -aG docker $USER
 newgrp docker
 
 # Verify
-docker --version
-docker compose version
+docker --version        # Phải ≥ 24.0
+docker compose version  # Phải ≥ 2.0
 ```
 
-### 3. Cài Python + dependencies
+### 3. Cài Git + Python
 
 ```bash
-sudo apt install -y python3 python3-pip
-pip3 install --break-system-packages pymysql pymongo redis kafka-python prometheus-client
+sudo apt install -y git python3 python3-pip
+
+# Cài Python dependencies cho demo server và benchmark
+pip3 install --break-system-packages \
+  pymysql pymongo redis kafka-python \
+  prometheus-client flask flask-cors requests
 ```
 
-### 4. Cài sbt (nếu cần rebuild JAR Scala)
-
-```bash
-echo "deb https://repo.scala-sbt.org/scalasbt/debian all main" | sudo tee /etc/apt/sources.list.d/sbt.list
-curl -sL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x99E82A75642AC823" | sudo gpg --dearmor -o /usr/share/keyrings/sbt.gpg
-sudo apt update
-sudo apt install -y sbt default-jdk
-sbt --version
-```
-
-### 5. Clone project
+### 4. Clone project
 
 ```bash
 cd ~
-git clone <your-repo-url> cdc-pipeline
-cd cdc-pipeline
+git clone <your-repo-url> cdc-data-pipeline
+cd cdc-data-pipeline
 ```
 
-### 6. Khởi động
+### 5. Chỉnh cấu hình cho VM (nếu RAM ≥ 32GB)
+
+File `.env.server` đã có sẵn cho workstation 32GB+. `start.sh` tự detect hardware:
+
+```bash
+# Xem start.sh sẽ dùng profile nào
+bash start.sh --detect
+
+# Force dùng profile server nếu VM có ≥ 32GB RAM
+bash start.sh --profile=server
+```
+
+Nếu VM có cấu hình khác (ví dụ 16 vCPU, 64GB), có thể sửa `.env.server`:
+```bash
+# Tăng số core và memory cho Spark workers
+SPARK_WORKER_CORES=8
+SPARK_WORKER_MEMORY=8g
+```
+
+### 6. Khởi động pipeline
 
 ```bash
 bash start.sh
+# Chờ 3–5 phút. Script tự: pull images → start containers → register connector → submit Spark job
+```
+
+Verify mọi thứ OK:
+```bash
+bash test_smoke.sh
+# Kết quả mong đợi: 43/43 PASS
 ```
 
 ---
 
-## Scale lên 6 hoặc 8 workers
+## Scale lên nhiều Spark workers hơn
 
-Mặc định `docker-compose.yml` có 3 workers (`spark-worker-1, 2, 3`). Để tăng:
+Mặc định `docker-compose.yml` có 3 workers (`spark-worker-1, 2, 3`). VM mạnh hơn có thể chạy nhiều hơn.
 
-### Cách 1: Thêm worker vào docker-compose.yml
+### Thêm worker mới vào docker-compose.yml
 
-Edit `pipeline/docker-compose.yml`, copy block `spark-worker-3` rồi đổi tên + port:
+Copy block `spark-worker-3` trong `docker-compose.yml`, đổi tên + port:
 
 ```yaml
-spark-worker-4:
-  image: cdc-spark:3.5.0
-  build:
-    context: ../spark
-    dockerfile: Dockerfile
-  container_name: cdc-spark-worker-4
-  networks:
-    - cdc-net
-  depends_on:
-    spark-master:
-      condition: service_healthy
-  command: >
-    /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://cdc-spark-master:7077
-  ports:
-    - "8086:8081"    # Port UI khác nhau
-  volumes:
-    - ../jobs:/opt/spark/jobs
-
-# Tương tự cho spark-worker-5, 6, 7, 8...
+  spark-worker-4:
+    image: bitnami/spark:3.5.0
+    container_name: cdc-spark-worker-4
+    networks:
+      - cdc-net
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://cdc-spark-master:7077
+      - SPARK_WORKER_CORES=4
+      - SPARK_WORKER_MEMORY=4G
+    ports:
+      - "8086:8081"
+    volumes:
+      - ./jobs:/opt/spark/jobs
 ```
 
-Rồi khởi động lại:
-
+Sau đó restart:
 ```bash
 bash stop.sh
 bash start.sh
 ```
 
-### Cách 2: Limit resource của worker
+### Điều chỉnh resource mỗi worker (trong .env.server)
 
-Trong `docker-compose.yml`, thêm environment cho worker:
-
-```yaml
-environment:
-  SPARK_WORKER_CORES: 4      # Mỗi worker dùng 4 cores
-  SPARK_WORKER_MEMORY: 4G    # Mỗi worker dùng 4GB RAM
+```bash
+SPARK_WORKER_CORES=6       # VM 16 vCPU → 4 workers × 4 cores
+SPARK_WORKER_MEMORY=8g     # VM 32GB RAM → 4 workers × 8GB
 ```
-
-VM 16 cores → 8 workers × 2 cores hoặc 4 workers × 4 cores.
 
 ---
 
@@ -164,36 +177,47 @@ docker exec cdc-kafka kafka-topics \
 
 ---
 
-## Benchmark scale
+## Chạy benchmark
 
-### 1. Chạy baseline (1 partition, 3 workers)
+### 1. Chạy quick benchmark
 
 ```bash
-bash benchmark/benchmark_scaling.sh --quick
+bash run_bench.sh           # Quick mode (~3 phút)
+bash run_bench.sh full      # Full mode (~10 phút)
 ```
 
-Kết quả sẽ ghi vào `benchmark/results/scaling_<timestamp>.json`.
+Kết quả append vào `benchmark/results/history.jsonl`.
 
-### 2. Tăng partition + Rebuild JAR nếu cần
+### 2. Tăng Kafka partition (optional)
 
 ```bash
-# Đổi Kafka topic sang 3 partitions
+# Tăng từ 1 lên 3 partitions (chỉ tăng được, không giảm)
 docker exec cdc-kafka kafka-topics --alter \
   --bootstrap-server localhost:9092 \
   --topic inventory.inventory.customers --partitions 3
+
+docker exec cdc-kafka kafka-topics --alter \
+  --bootstrap-server localhost:9092 \
+  --topic inventory.inventory.orders --partitions 3
 ```
 
-### 3. Chạy benchmark lại, so sánh
-
+Sau đó restart Spark job để nó detect partition mới:
 ```bash
-bash benchmark/benchmark_scaling.sh
+# Xem PID của Spark driver
+docker exec cdc-spark-master bash -c "ps aux | grep CdcRedisConsumer"
+
+# Kill và submit lại (start.sh có sẵn step này)
+bash start.sh   # Idempotent — tự detect và resubmit nếu cần
 ```
 
-### 4. Tải kết quả về máy local
+### 3. Tải kết quả về máy local
 
 ```bash
-# Trên máy local
-scp user@vm-ip:~/cdc-pipeline/benchmark/results/*.json ./benchmark/results/
+# Từ máy local (thay user và vm-ip)
+scp user@vm-ip:~/cdc-data-pipeline/benchmark/results/history.jsonl ./benchmark/results/vm_history.jsonl
+
+# So sánh
+python benchmark/compare_runs.py -n 10
 ```
 
 ---
