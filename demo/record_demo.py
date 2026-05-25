@@ -17,6 +17,10 @@ import urllib.request, urllib.parse
 from pathlib import Path
 from datetime import datetime
 
+# Windows cp1252 terminals break on box-drawing / arrow chars
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # ── Load .env (cùng cách demo_server.py) ───────────────────────────────
 _env = Path(__file__).parent / ".env"
 if _env.exists():
@@ -173,7 +177,7 @@ def _redis_get(key: str) -> float:
 
 def _mongo_count(col: str) -> int:
     try:
-        if _mongo:
+        if _mongo is not None:
             return _mongo[col].count_documents({})
     except Exception:
         pass

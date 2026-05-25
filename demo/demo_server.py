@@ -5,8 +5,11 @@ Run  : python demo_server.py   (sau khi: pip install -r requirements.txt)
 Open : http://localhost:8888
 """
 
-import os, json, time, threading, random, subprocess
+import os, sys, json, time, threading, random, subprocess
 from pathlib import Path
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 # Load .env từ cùng thư mục (nếu có) — không cần python-dotenv
 _env = Path(__file__).parent / ".env"
