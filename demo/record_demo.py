@@ -12,7 +12,7 @@ Output:
     demo/recordings/demo_YYYY-MM-DD_HH-MM-SS_summary.txt  (khi Ctrl+C)
 """
 
-import os, sys, json, time, signal, math
+import os, sys, json, time, signal, math, platform, shutil, subprocess
 import urllib.request, urllib.parse
 from pathlib import Path
 from datetime import datetime
@@ -49,6 +49,85 @@ _rec_dir.mkdir(exist_ok=True)
 _ts_str  = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 OUTFILE  = _rec_dir / f"demo_{_ts_str}.jsonl"
 SUMFILE  = _rec_dir / f"demo_{_ts_str}_summary.txt"
+
+# ── Hardware snapshot ────────────────────────────────────────────────────
+def _ram_info() -> dict:
+    """Đọc /proc/meminfo (Linux) hoặc dùng fallback."""
+    try:
+        with open("/proc/meminfo") as f:
+            info = {k.strip(): int(v.split()[0]) for k, v in
+                    (line.split(":", 1) for line in f if ":" in line)}
+        total = round(info.get("MemTotal", 0) / 1024 / 1024, 1)
+        avail = round(info.get("MemAvailable", 0) / 1024 / 1024, 1)
+        return {"ram_total_gb": total, "ram_avail_gb": avail}
+    except Exception:
+        return {"ram_total_gb": -1, "ram_avail_gb": -1}
+
+def _disk_info() -> dict:
+    try:
+        usage = shutil.disk_usage("/")
+        return {"disk_total_gb": round(usage.total / 1e9, 1),
+                "disk_avail_gb": round(usage.free  / 1e9, 1)}
+    except Exception:
+        return {"disk_total_gb": -1, "disk_avail_gb": -1}
+
+def _cpu_model() -> str:
+    try:
+        with open("/proc/cpuinfo") as f:
+            for line in f:
+                if line.startswith("model name"):
+                    return line.split(":", 1)[1].strip()
+    except Exception:
+        pass
+    return platform.processor() or "unknown"
+
+def _docker_version() -> str:
+    try:
+        r = subprocess.run(["docker", "--version"], capture_output=True, text=True, timeout=3)
+        return r.stdout.strip().split(",")[0].replace("Docker version ", "")
+    except Exception:
+        return "unknown"
+
+def _container_count(name_filter: str) -> int:
+    try:
+        r = subprocess.run(
+            ["docker", "ps", "--filter", f"name={name_filter}", "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=3,
+        )
+        return len([l for l in r.stdout.splitlines() if l.strip()])
+    except Exception:
+        return -1
+
+def _detect_profile() -> str:
+    """Đọc profile từ .env.vm / .env.server / .env.laptop đã active (dựa vào SPARK_WORKER_CORES)."""
+    cores = os.getenv("SPARK_WORKER_CORES", "")
+    mem   = os.getenv("SPARK_WORKER_MEMORY", "")
+    if cores == "4":  return "vm"
+    if cores == "2":  return "server"
+    if cores == "1":  return "laptop"
+    return f"custom(cores={cores},mem={mem})" if cores else "unknown"
+
+def collect_hardware() -> dict:
+    ram  = _ram_info()
+    disk = _disk_info()
+    return {
+        "type":              "hardware_snapshot",
+        "ts":                int(time.time()),
+        "time":              datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "hostname":          platform.node(),
+        "os":                f"{platform.system()} {platform.release()}",
+        "cpu_cores":         os.cpu_count() or -1,
+        "cpu_model":         _cpu_model(),
+        **ram,
+        **disk,
+        "docker_version":    _docker_version(),
+        "profile":           _detect_profile(),
+        "spark_worker_cores":   os.getenv("SPARK_WORKER_CORES",   "?"),
+        "spark_worker_memory":  os.getenv("SPARK_WORKER_MEMORY",  "?"),
+        "kafka_partitions":     os.getenv("KAFKA_NUM_PARTITIONS", "?"),
+        "spark_workers_running": _container_count("cdc-spark-worker"),
+        "kafka_brokers_running": _container_count("cdc-kafka"),
+    }
 
 # ── Optional dependencies ────────────────────────────────────────────────
 try:
@@ -200,6 +279,14 @@ def summarize(samples: list, duration_s: int) -> str:
         f"Duration       : {duration_s}s  ({len(samples)} samples @ {INTERVAL}s interval)",
         f"Output file    : {OUTFILE}",
         "",
+        "── Hardware ────────────────────────────────────────",
+        f"Host           : {hw['hostname']}  ({hw['os']})",
+        f"CPU            : {hw['cpu_cores']} cores",
+        f"RAM            : {hw['ram_total_gb']} GB total, {hw['ram_avail_gb']} GB free at start",
+        f"Disk free      : {hw['disk_avail_gb']} GB",
+        f"Profile        : {hw['profile']}  (spark={hw['spark_worker_cores']}c/{hw['spark_worker_memory']}, kafka_part={hw['kafka_partitions']})",
+        f"Workers        : {hw['spark_workers_running']} Spark, {hw['kafka_brokers_running']} Kafka brokers",
+        "",
         "── Throughput ──────────────────────────────────────",
         f"Peak insert rate : {peak_rate:.1f} rec/s",
         f"Avg insert rate  : {avg_rate:.1f} rec/s",
@@ -246,6 +333,19 @@ signal.signal(signal.SIGTERM, on_exit)
 
 print(f"CDC Demo Recorder  |  interval={INTERVAL}s  |  Ctrl+C to stop + summary")
 print(f"JSONL → {OUTFILE}")
+
+# Ghi + hiển thị hardware snapshot
+hw = collect_hardware()
+with open(OUTFILE, "a", encoding="utf-8") as f:
+    f.write(json.dumps(hw) + "\n")
+print(SEP)
+print(f"  HOST    : {hw['hostname']}  ({hw['os']})")
+print(f"  CPU     : {hw['cpu_cores']} cores — {hw['cpu_model']}")
+print(f"  RAM     : {hw['ram_total_gb']} GB total, {hw['ram_avail_gb']} GB free")
+print(f"  DISK    : {hw['disk_avail_gb']} GB free / {hw['disk_total_gb']} GB total")
+print(f"  PROFILE : {hw['profile']}  (spark={hw['spark_worker_cores']}c/{hw['spark_worker_memory']}, kafka_part={hw['kafka_partitions']})")
+print(f"  RUNNING : {hw['spark_workers_running']} Spark workers, {hw['kafka_brokers_running']} Kafka brokers")
+
 print(SEP)
 print(HDR)
 print(SEP)
