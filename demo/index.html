@@ -238,6 +238,59 @@ footer {
 .cmp-legend { display: flex; gap: 16px; margin-bottom: 10px; font-size: 11px; flex-wrap: wrap; }
 @media (max-width: 1100px) { .cmp-grid { grid-template-columns: 1fr; } .cmp-arrow { display: none; } }
 
+/* ── Scene 1: Single Insert ── */
+.si-wrap { display: flex; flex-direction: column; gap: 14px; }
+.si-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.si-input {
+  background: var(--card); border: 1px solid var(--border); color: var(--text);
+  padding: 8px 12px; border-radius: 6px; font-size: 13px; flex: 1; min-width: 160px;
+  font-family: 'Inter', sans-serif; outline: none; transition: border-color .15s;
+}
+.si-input:focus { border-color: var(--blue); }
+.si-input::placeholder { color: var(--dim); }
+.si-btn {
+  background: linear-gradient(135deg, #059669, #047857); border: none; color: #fff;
+  padding: 8px 22px; border-radius: 8px; cursor: pointer; font-size: 13px;
+  font-weight: 700; letter-spacing: .5px; transition: all .15s; white-space: nowrap;
+}
+.si-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(5,150,105,.4); }
+.si-btn:disabled { background: var(--card2); color: var(--dim); cursor: not-allowed; }
+.si-pipeline {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 10px 0; overflow-x: auto;
+}
+.si-arrow { color: var(--blue); font-size: 18px; font-weight: 700; flex-shrink: 0; }
+.si-step {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 14px; flex: 1; min-width: 130px; transition: all .3s;
+}
+.si-step.active { border-color: var(--orange); background: rgba(255,152,48,.06); }
+.si-step.done   { border-color: var(--green);  background: rgba(115,191,105,.06); }
+.si-step.error  { border-color: var(--red);    background: rgba(242,73,92,.06); }
+.si-step-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--border); flex-shrink: 0; transition: background .3s;
+}
+.si-step.active .si-step-dot { background: var(--orange); animation: pulse 1s infinite; }
+.si-step.done   .si-step-dot { background: var(--green); }
+.si-step.error  .si-step-dot { background: var(--red); }
+.si-step-name { font-size: 12px; font-weight: 600; color: var(--text); }
+.si-step-time { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--dim); margin-top: 2px; }
+.si-step.done .si-step-time { color: var(--green); }
+.si-result {
+  display: flex; align-items: center; gap: 20px;
+  padding: 12px 18px; background: var(--card); border-radius: 8px;
+  border: 1px solid rgba(115,191,105,.4);
+}
+.si-e2e-label { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--dim); }
+.si-e2e-val {
+  font-size: 34px; font-weight: 800; color: var(--green);
+  font-family: 'JetBrains Mono', monospace; letter-spacing: -1px; line-height: 1;
+}
+.si-e2e-unit { font-size: 13px; font-weight: 400; color: var(--dim); margin-left: 2px; }
+.si-record { font-size: 12px; font-family: 'JetBrains Mono', monospace; color: var(--dim); line-height: 1.7; }
+
 /* ── Animations ── */
 @keyframes flash { 0%{opacity:.5;transform:scale(.97)} 100%{opacity:1;transform:scale(1)} }
 .flash { animation: flash .25s ease-out; }
@@ -451,6 +504,8 @@ footer {
       <button class="rate-btn active" data-rate="100">100 /s</button>
       <button class="rate-btn"        data-rate="200">200 /s</button>
       <button class="rate-btn"        data-rate="500">500 /s</button>
+      <button class="rate-btn"        data-rate="1000">1k /s</button>
+      <button class="rate-btn"        data-rate="2000">2k /s</button>
     </div>
     <button class="start-btn" id="startBtn">
       <span id="btnIcon">▶</span>
@@ -465,6 +520,55 @@ footer {
       <div class="s-stat">
         <span class="v" id="injElapsed">00:00</span>
         <span class="l">elapsed</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scene 1: Single Insert with pipeline latency tracker -->
+  <div class="chart-card">
+    <div class="card-hdr">
+      <div class="card-title">🎯 Scene 1 — Khách hàng mới đăng ký (theo dõi realtime)</div>
+      <span style="font-size:11px;color:var(--dim)">Gõ tên → INSERT → quan sát từng bước qua pipeline</span>
+    </div>
+    <div class="si-wrap">
+      <div class="si-form">
+        <input class="si-input" id="siName"  type="text" placeholder="Tên khách hàng (VD: Nguyễn Văn An)" maxlength="80">
+        <input class="si-input" id="siEmail" type="text" placeholder="Email (tự sinh nếu bỏ trống)" maxlength="80">
+        <input class="si-input" id="siPhone" type="text" placeholder="SĐT (VD: 0901234567)" maxlength="20">
+        <button class="si-btn" id="siBtn" onclick="singleInsert()">▶ INSERT → WATCH</button>
+      </div>
+      <div class="si-pipeline">
+        <div class="si-step" id="step-mysql">
+          <div class="si-step-dot"></div>
+          <div><div class="si-step-name">🗄 MySQL INSERT</div><div class="si-step-time" id="step-mysql-time">—</div></div>
+        </div>
+        <div class="si-arrow">→</div>
+        <div class="si-step" id="step-debezium">
+          <div class="si-step-dot"></div>
+          <div><div class="si-step-name">🔗 Debezium binlog</div><div class="si-step-time" id="step-debezium-time">—</div></div>
+        </div>
+        <div class="si-arrow">→</div>
+        <div class="si-step" id="step-kafka">
+          <div class="si-step-dot"></div>
+          <div><div class="si-step-name">📨 Kafka event</div><div class="si-step-time" id="step-kafka-time">—</div></div>
+        </div>
+        <div class="si-arrow">→</div>
+        <div class="si-step" id="step-spark">
+          <div class="si-step-dot"></div>
+          <div><div class="si-step-name">⚙ Spark batch</div><div class="si-step-time" id="step-spark-time">—</div></div>
+        </div>
+        <div class="si-arrow">→</div>
+        <div class="si-step" id="step-mongo">
+          <div class="si-step-dot"></div>
+          <div><div class="si-step-name">🍃 MongoDB synced</div><div class="si-step-time" id="step-mongo-time">—</div></div>
+        </div>
+      </div>
+      <div class="si-result" id="siResult" style="display:none">
+        <div>
+          <div class="si-e2e-label">E2E Latency</div>
+          <div class="si-e2e-val" id="siE2EVal">—<span class="si-e2e-unit">s</span></div>
+        </div>
+        <div class="si-record" id="siRecord"></div>
       </div>
     </div>
   </div>
@@ -984,17 +1088,21 @@ async function refresh() {
         ? `$${rd.orders_revenue.toLocaleString('en-US', { maximumFractionDigits: 0 })} revenue`
         : '—';
       if (ord.recent && ord.recent.length) {
+        const STATUS_NEXT  = { PENDING:'PROCESSING', PROCESSING:'SHIPPED', SHIPPED:'DELIVERED', DELIVERED:'CANCELLED', CANCELLED:'PENDING' };
+        const STATUS_COLOR = { DELIVERED:'var(--green)', SHIPPED:'var(--blue)', PROCESSING:'var(--orange)', PENDING:'var(--dim)', CANCELLED:'var(--red)' };
         $('ordersTbody').innerHTML = ord.recent.map(o => {
-          const statusColor = {
-            DELIVERED: 'var(--green)', SHIPPED: 'var(--blue)',
-            PROCESSING: 'var(--orange)', PENDING: 'var(--dim)',
-            CANCELLED: 'var(--red)',
-          }[o.status] || 'var(--dim)';
+          const sc  = STATUS_COLOR[o.status] || 'var(--dim)';
+          const nxt = STATUS_NEXT[o.status]  || 'PROCESSING';
           return `<tr>
             <td class="id-c">#${o.id ?? '—'}</td>
             <td style="color:var(--purple)">cust:${o.customer_id ?? '—'}</td>
             <td style="color:var(--green)">$${o.total_amount != null ? Number(o.total_amount).toLocaleString('en-US', {maximumFractionDigits:0}) : '—'}</td>
-            <td><span style="color:${statusColor};font-weight:600;font-size:11px">${o.status ?? '—'}</span></td>
+            <td>
+              <span style="color:${sc};font-weight:600;font-size:11px">${o.status ?? '—'}</span>
+              <button onclick="cycleOrderStatus(${o.id},'${o.status}')" title="→ ${nxt}"
+                style="margin-left:6px;background:transparent;border:1px solid var(--border);color:var(--dim);
+                       border-radius:4px;padding:1px 7px;font-size:10px;cursor:pointer;vertical-align:middle">→</button>
+            </td>
           </tr>`;
         }).join('');
       } else {
@@ -1218,6 +1326,102 @@ async function refreshFT() {
     ftLastPhase = phase;
 
   } catch (err) { console.error('[refreshFT]', err); }
+}
+
+// ── Scene 1: Single Insert ───────────────────────────────
+function stepReset() {
+  ['mysql','debezium','kafka','spark','mongo'].forEach(s => {
+    $(`step-${s}`).className = 'si-step';
+    $(`step-${s}-time`).textContent = '—';
+  });
+  $('siResult').style.display = 'none';
+}
+
+function stepState(name, state, time) {
+  $(`step-${name}`).className = `si-step ${state}`;
+  if (time !== undefined) $(`step-${name}-time`).textContent = time;
+}
+
+async function singleInsert() {
+  const name  = $('siName').value.trim()  || 'Nguyễn Văn Demo';
+  const email = $('siEmail').value.trim() || '';
+  const phone = $('siPhone').value.trim() || '0900000000';
+
+  stepReset();
+  const btn = $('siBtn');
+  btn.disabled = true;
+  btn.textContent = '⟳ Đang xử lý...';
+
+  // Animate pipeline stages while waiting for real response
+  stepState('mysql', 'active', 'inserting...');
+  const t1 = setTimeout(() => { stepState('debezium', 'active', 'reading binlog...'); }, 300);
+  const t2 = setTimeout(() => {
+    stepState('mysql',    'done', '');
+    stepState('debezium', 'done', '~50ms');
+    stepState('kafka',    'active', 'event queued...');
+  }, 700);
+  const t3 = setTimeout(() => {
+    stepState('kafka', 'done', '~80ms');
+    stepState('spark', 'active', 'next trigger...');
+  }, 1200);
+
+  try {
+    const res = await fetch('/api/insert_one', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, phone }),
+    });
+    const d = await res.json();
+    clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
+
+    if (!d.ok) {
+      stepState('mysql', 'error', 'lỗi insert');
+      btn.disabled = false; btn.textContent = '▶ INSERT → WATCH';
+      return;
+    }
+
+    stepState('mysql',    'done', `${d.mysql_ms}ms`);
+    stepState('debezium', 'done', '~50ms');
+    stepState('kafka',    'done', '~80ms');
+
+    if (d.synced) {
+      const sparkMs = Math.max(0, d.mongo_ms - 150);
+      stepState('spark', 'done', `~${sparkMs}ms`);
+      stepState('mongo', 'done', `${d.mongo_ms}ms`);
+
+      $('siE2EVal').innerHTML = `${(d.e2e_ms / 1000).toFixed(2)}<span class="si-e2e-unit">s</span>`;
+      $('siRecord').innerHTML = `
+        ID: <span style="color:var(--blue)">${d.id}</span> &nbsp;
+        <span style="color:var(--text)">${d.name}</span> &nbsp;
+        <span style="color:var(--dim)">${d.email}</span><br>
+        <span style="color:var(--green)">✓ MySQL → Kafka → Spark → MongoDB trong ${d.mongo_ms}ms</span>`;
+      $('siResult').style.display = 'flex';
+    } else {
+      stepState('spark', 'active', 'processing...');
+      stepState('mongo',  'error', 'timeout >15s');
+    }
+  } catch (e) {
+    clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
+    stepState('mysql', 'error', 'network error');
+  }
+  btn.disabled = false;
+  btn.textContent = '▶ INSERT → WATCH';
+}
+
+// ── Scene 3: Cycle Order Status ──────────────────────────
+async function cycleOrderStatus(orderId, currentStatus) {
+  const STATUS_NEXT = {
+    PENDING:'PROCESSING', PROCESSING:'SHIPPED', SHIPPED:'DELIVERED',
+    DELIVERED:'CANCELLED', CANCELLED:'PENDING',
+  };
+  const nextStatus = STATUS_NEXT[currentStatus] || 'PROCESSING';
+  try {
+    await fetch('/api/update_order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: orderId, status: nextStatus }),
+    });
+  } catch (e) { console.error('[cycleOrderStatus]', e); }
 }
 </script>
 </body>

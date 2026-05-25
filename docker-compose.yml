@@ -290,11 +290,78 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
 
+  # ── Kafka broker 2 (scale-out) ────────────────────────────────────────
+  # Không khởi động mặc định. Dùng: bash demo/kafka_scale.sh add
+  kafka-2:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: cdc-kafka-2
+    networks:
+      - cdc-net
+    profiles:
+      - multi-broker
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9093:9093"
+      - "29093:29093"
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: cdc-zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9093,PLAINTEXT_INTERNAL://cdc-kafka-2:29093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9093,PLAINTEXT_INTERNAL://0.0.0.0:29093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_HEAP_OPTS: "${KAFKA_HEAP_OPTS:--Xmx1g -Xms512m}"
+    volumes:
+      - kafka_data_2:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:29093"]
+      interval: 15s
+      timeout: 10s
+      retries: 15
+      start_period: 80s
+
+  # ── Kafka broker 3 (scale-out) ────────────────────────────────────────
+  kafka-3:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: cdc-kafka-3
+    networks:
+      - cdc-net
+    profiles:
+      - multi-broker
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9094:9094"
+      - "29094:29094"
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_ZOOKEEPER_CONNECT: cdc-zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9094,PLAINTEXT_INTERNAL://cdc-kafka-3:29094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9094,PLAINTEXT_INTERNAL://0.0.0.0:29094
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_HEAP_OPTS: "${KAFKA_HEAP_OPTS:--Xmx1g -Xms512m}"
+    volumes:
+      - kafka_data_3:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:29094"]
+      interval: 15s
+      timeout: 10s
+      retries: 15
+      start_period: 80s
+
 volumes:
   mysql_data:
   mongodb_data:
   zookeeper_data:
   kafka_data:
+  kafka_data_2:
+  kafka_data_3:
   grafana_data:
   redis_data:
   spark_checkpoint:

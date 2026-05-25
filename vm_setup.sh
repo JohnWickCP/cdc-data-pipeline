@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# vm_setup.sh — Cài đặt một lần trên VM mới (Ubuntu 22.04)
+# Chạy sau khi git clone, trước khi start.sh
+#
+# Usage: bash vm_setup.sh
+# Thời gian: ~3-5 phút
+
+set -euo pipefail
+
+log()  { echo ""; echo "▶ $*"; }
+ok()   { echo "  ✓ $*"; }
+warn() { echo "  ! $*"; }
+
+# ── 1. Docker ────────────────────────────────────────────────────────────
+log "Kiểm tra Docker..."
+if command -v docker &>/dev/null && docker compose version &>/dev/null; then
+    ok "Docker đã có: $(docker --version)"
+else
+    log "Cài Docker Engine..."
+    curl -fsSL https://get.docker.com | sudo sh
+    sudo usermod -aG docker "$USER"
+    ok "Docker đã cài. Áp dụng group ngay trong session này..."
+    # Áp dụng group mà không cần logout
+    exec sg docker "$0 $*"
+fi
+
+# ── 2. Python + pip dependencies ─────────────────────────────────────────
+log "Kiểm tra Python..."
+PYTHON=""
+for cmd in python3 python; do
+    if $cmd --version &>/dev/null 2>&1; then
+        PYTHON="$cmd"; break
+    fi
+done
+
+if [ -z "$PYTHON" ]; then
+    log "Cài Python3..."
+    sudo apt-get update -qq
+    sudo apt-get install -y python3 python3-pip
+    PYTHON="python3"
+fi
+ok "Python: $($PYTHON --version)"
+
+log "Cài Python dependencies (Flask, pymysql, pymongo, redis)..."
+$PYTHON -m pip install --quiet --break-system-packages \
+    flask>=2.3.0 \
+    pymysql>=1.1.0 \
+    cryptography>=42.0 \
+    pymongo>=4.6.0 \
+    redis>=5.0.0 \
+    2>/dev/null || \
+$PYTHON -m pip install --quiet \
+    flask>=2.3.0 \
+    pymysql>=1.1.0 \
+    cryptography>=42.0 \
+    pymongo>=4.6.0 \
+    redis>=5.0.0
+ok "Python packages installed"
+
+# ── 3. Các tool phụ ─────────────────────────────────────────────────────
+log "Kiểm tra netcat (nc)..."
+if ! command -v nc &>/dev/null; then
+    sudo apt-get install -y netcat-openbsd -qq
+    ok "netcat installed"
+else
+    ok "netcat đã có"
+fi
+
+# ── 4. Demo env file ─────────────────────────────────────────────────────
+log "Cài đặt demo/.env..."
+if [ ! -f demo/.env ]; then
+    cp demo/.env.example demo/.env
+    ok "Tạo demo/.env từ .env.example (mặc định: localhost)"
+else
+    ok "demo/.env đã có — giữ nguyên"
+fi
+
+# ── 5. Thư mục recordings ────────────────────────────────────────────────
+mkdir -p demo/recordings
+ok "demo/recordings/ ready"
+
+# ── 6. Phát hiện hardware ────────────────────────────────────────────────
+log "Phát hiện hardware..."
+DETECTED_PROFILE=$(bash start.sh --detect 2>/dev/null | grep "Profile" | awk '{print $NF}' || echo "server")
+
+echo ""
+echo "════════════════════════════════════════════════"
+echo " VM Setup hoàn tất!"
+echo "════════════════════════════════════════════════"
+echo ""
+echo " Thông số phát hiện:"
+echo "   RAM : $(free -m 2>/dev/null | awk '/^Mem/{printf "%.1f GB", $2/1024}' || echo "?")"
+echo "   CPU : $(nproc 2>/dev/null || echo "?") cores"
+echo "   Disk: $(df -h / 2>/dev/null | awk 'NR==2{print $4}' || echo "?") available"
+echo ""
+echo " Bước tiếp theo:"
+echo ""
+echo "   1. Khởi động pipeline:"
+echo "      bash start.sh --profile=vm"
+echo "      # Chờ 5-8 phút lần đầu (Spark download packages)"
+echo ""
+echo "   2. Smoke test:"
+echo "      bash test_smoke.sh"
+echo ""
+echo "   3. Terminal A — Demo server:"
+echo "      cd demo && bash run_demo.sh"
+echo ""
+echo "   4. Terminal B — Recorder (ghi metrics):"
+echo "      python3 demo/record_demo.py"
+echo ""
+echo "   5. Mở browser: http://$(curl -sf --max-time 2 http://checkip.amazonaws.com 2>/dev/null || hostname -I | awk '{print $1}'):8888"
+echo ""
+echo "════════════════════════════════════════════════"

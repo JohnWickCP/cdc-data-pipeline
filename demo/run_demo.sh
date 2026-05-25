@@ -15,7 +15,9 @@ echo "[demo] Installing dependencies..."
 pip install -r requirements.txt -q
 
 echo "[demo] Starting CDC Demo Server..."
-echo "[demo] Open: http://localhost:${DEMO_PORT:-8888}"
+VM_IP=$(curl -sf --max-time 2 http://checkip.amazonaws.com 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
+echo "[demo] Open: http://${VM_IP}:${DEMO_PORT:-8888}"
+echo "[demo] (nếu chạy local: http://localhost:${DEMO_PORT:-8888})"
 echo ""
 
 python3 demo_server.py 2>/dev/null || python demo_server.py

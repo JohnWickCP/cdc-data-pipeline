@@ -74,8 +74,9 @@ def _rand_phone() -> str:
 
 def _load_worker(rate: int):
     """Background thread: INSERT vào MySQL ở tốc độ target."""
-    # batch_size nhỏ → nhiều batches/s, cap ở 50 để không quá tải
-    batch_size = max(1, min(rate // 5, 50))
+    # Mục tiêu: ~10 batches/s ở mọi rate (ổn định hơn sleep nhỏ)
+    # batch_size = rate/10, cap ở 200 rows (MySQL executemany limit thực tế)
+    batch_size = max(1, min(rate // 10, 200))
     interval   = batch_size / rate  # giây giữa mỗi batch
 
     try:
@@ -692,6 +693,80 @@ def api_ft_reset():
             after_mysql=0, after_mongo=0, timeline=[],
         )
     return jsonify({"ok": True})
+
+
+@app.route("/api/insert_one", methods=["POST"])
+def api_insert_one():
+    body  = request.get_json(silent=True) or {}
+    name  = body.get("name",  "Demo User")
+    email = body.get("email", "") or f"demo{int(time.time())}@test.com"
+    phone = body.get("phone", "0900000000")
+
+    t0 = time.time()
+    try:
+        conn = pymysql.connect(
+            host=MYSQL_HOST, port=MYSQL_PORT,
+            user=MYSQL_USER, password=MYSQL_PASS, db=MYSQL_DB,
+            autocommit=True, charset="utf8mb4",
+        )
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO customers (name, email, phone) VALUES (%s, %s, %s)",
+            (name, email, phone),
+        )
+        new_id   = cur.lastrowid
+        mysql_ms = int((time.time() - t0) * 1000)
+        conn.close()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+    # Poll MongoDB until record appears (max 15s, check every 200ms)
+    client = pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000)
+    db     = client["inventory"]
+    mongo_ms = None
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        doc = db["customers"].find_one({"_id": new_id})
+        if doc is None:
+            doc = db["customers"].find_one({"_id": int(new_id)})
+        if doc:
+            mongo_ms = int((time.time() - t0) * 1000)
+            break
+        time.sleep(0.2)
+
+    return jsonify({
+        "ok":       True,
+        "id":       new_id,
+        "name":     name,
+        "email":    email,
+        "mysql_ms": mysql_ms,
+        "mongo_ms": mongo_ms,
+        "e2e_ms":   mongo_ms,
+        "synced":   mongo_ms is not None,
+    })
+
+
+@app.route("/api/update_order", methods=["POST"])
+def api_update_order():
+    body       = request.get_json(silent=True) or {}
+    order_id   = body.get("id")
+    new_status = body.get("status")
+    valid      = {"PENDING", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"}
+    if new_status not in valid:
+        return jsonify({"ok": False, "reason": "invalid status"})
+    try:
+        conn = pymysql.connect(
+            host=MYSQL_HOST, port=MYSQL_PORT,
+            user=MYSQL_USER, password=MYSQL_PASS, db=MYSQL_DB,
+            autocommit=True,
+        )
+        cur = conn.cursor()
+        cur.execute("UPDATE orders SET status = %s WHERE id = %s", (new_status, order_id))
+        affected = cur.rowcount
+        conn.close()
+        return jsonify({"ok": True, "affected": affected, "new_status": new_status})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
 
 if __name__ == "__main__":

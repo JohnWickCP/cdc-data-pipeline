@@ -313,7 +313,9 @@ def run_e2e_test(target_tps, duration_s=30, max_drain_s=120):
         "inject_tps": round(inject_tps, 1),
         "e2e_tps": round(e2e_tps, 1),
         "spark_batch_avg_ms": round(statistics.mean(spark_values), 1) if spark_values else 0,
+        "spark_batch_p50_ms": round(spark_values[int(len(spark_values) * 0.50)], 1) if spark_values else 0,
         "spark_batch_p95_ms": round(spark_values[int(len(spark_values) * 0.95)], 1) if spark_values else 0,
+        "spark_batch_p99_ms": round(spark_values[int(len(spark_values) * 0.99)], 1) if spark_values else 0,
         "kafka_rate_avg": round(statistics.mean(kafka_rates), 1) if kafka_rates else 0,
         "mongo_rate_avg": round(statistics.mean(mongo_rates), 1) if mongo_rates else 0,
         "samples_count": len(samples),
@@ -386,7 +388,9 @@ def run_e2e_realistic_test(target_tps, duration_s=30, max_drain_s=120):
         "lag_remaining":      0,
         "synced":             settled,
         "spark_batch_avg_ms": round(statistics.mean(spark_values), 1) if spark_values else 0,
+        "spark_batch_p50_ms": round(spark_values[int(len(spark_values) * 0.50)], 1) if spark_values else 0,
         "spark_batch_p95_ms": round(spark_values[int(len(spark_values) * 0.95)], 1) if spark_values else 0,
+        "spark_batch_p99_ms": round(spark_values[int(len(spark_values) * 0.99)], 1) if spark_values else 0,
         "kafka_rate_avg":     round(statistics.mean(kafka_rates), 1) if kafka_rates else 0,
         "samples_count":      len(samples),
     }
@@ -674,7 +678,7 @@ def main():
         print(f"  {C.DIM}Thời gian inject:{C.X}  {result['inject_elapsed_s']}s")
         print(f"  {C.DIM}Thời gian drain:{C.X}   {result['drain_elapsed_s']}s")
         print(f"  {C.DIM}TỔNG thời gian:{C.X}    {result['total_elapsed_s']}s")
-        print(f"  {C.DIM}Spark batch:{C.X}        avg {result['spark_batch_avg_ms']}ms, p95 {result['spark_batch_p95_ms']}ms")
+        print(f"  {C.DIM}Spark batch:{C.X}        avg {result['spark_batch_avg_ms']}ms, p50 {result['spark_batch_p50_ms']}ms, p95 {result['spark_batch_p95_ms']}ms, p99 {result['spark_batch_p99_ms']}ms")
         print(f"  {C.DIM}Kafka rate:{C.X}         {result['kafka_rate_avg']} events/s")
 
         ramp_results.append(result)
@@ -721,7 +725,7 @@ def main():
     print(f"  {C.DIM}Records:{C.X}           {sustained_result['mongo_delta']}")
     print(f"  {C.DIM}Lag:{C.X}               {sustained_result['lag_remaining']}")
     print(f"  {C.DIM}Tổng thời gian:{C.X}    {sustained_result['total_elapsed_s']}s")
-    print(f"  {C.DIM}Spark p95:{C.X}          {sustained_result['spark_batch_p95_ms']}ms")
+    print(f"  {C.DIM}Spark p50/p95/p99:{C.X}  {sustained_result['spark_batch_p50_ms']}/{sustained_result['spark_batch_p95_ms']}/{sustained_result['spark_batch_p99_ms']}ms")
 
     # ── Generate report ───────────────────────────────────
     step("Lưu kết quả")
@@ -776,8 +780,9 @@ def main():
         "hw":            hw_short,
         "max_e2e_tps":   max_e2e_tps,
         "sus_tps":       sustained_result.get("e2e_tps"),
-        "spark_p50_ms":  sustained_result.get("spark_batch_avg_ms"),
+        "spark_p50_ms":  sustained_result.get("spark_batch_p50_ms"),
         "spark_p95_ms":  sustained_result.get("spark_batch_p95_ms"),
+        "spark_p99_ms":  sustained_result.get("spark_batch_p99_ms"),
         "kafka_rate":    sustained_result.get("kafka_rate_avg"),
         "partitions":    current_partitions,
         "bottleneck":    bottleneck["stage"] if bottleneck else None,
@@ -804,7 +809,7 @@ def main():
     print(f"      E2E records/s:    {sr['e2e_tps']}")
     print(f"      Records đến Mongo: {sr['mongo_delta']}")
     print(f"      Lag còn lại:      {sr['lag_remaining']}")
-    print(f"      Spark p50/p95:    {sr['spark_batch_avg_ms']}/{sr['spark_batch_p95_ms']}ms")
+    print(f"      Spark p50/p95/p99: {sr['spark_batch_p50_ms']}/{sr['spark_batch_p95_ms']}/{sr['spark_batch_p99_ms']}ms")
     print(f"      Kafka partitions: {current_partitions}")
 
     print(f"\n  📋 Cách đo: E2E = records đến MongoDB ÷ TỔNG thời gian (inject + drain)")
