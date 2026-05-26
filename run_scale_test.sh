@@ -1,24 +1,74 @@
 #!/usr/bin/env bash
 # run_scale_test.sh — Ma trận horizontal scaling test
 #
-# Test combinations: Spark workers (1→3→6) × Kafka partitions (3→6→12)
+# Test combinations: Spark workers × Kafka partitions
 # Partitions chỉ tăng không giảm → outer loop theo partitions, inner loop theo workers
 #
 # Usage:
-#   bash run_scale_test.sh          # mode quick (~3 phút/combo, tổng ~30 phút)
-#   bash run_scale_test.sh full     # mode full  (~10 phút/combo, tổng ~90 phút)
+#   bash run_scale_test.sh                                    # quick, 1→3→6 workers × 3→6→12 partitions
+#   bash run_scale_test.sh full                               # mode full
+#   bash run_scale_test.sh --workers=3,6 --partitions=6,12   # custom matrix
+#   bash run_scale_test.sh quick --workers=1,3               # quick mode, only 1 and 3 workers
 #
 # Kết quả: benchmark/results/history.jsonl → python3 benchmark/compare_runs.py
 
 set -uo pipefail
 
-MODE=${1:-quick}
+# ── Parse args ────────────────────────────────────────────────────────────
+MODE="quick"
+WORKERS_ARG="1,3,6"
+PARTITIONS_ARG="3,6,12"
+
+for arg in "$@"; do
+    case "$arg" in
+        quick|full|stress|realistic) MODE="$arg" ;;
+        --workers=*)    WORKERS_ARG="${arg#--workers=}" ;;
+        --partitions=*) PARTITIONS_ARG="${arg#--partitions=}" ;;
+        --help|-h)
+            echo "Usage: bash run_scale_test.sh [mode] [--workers=N,...] [--partitions=N,...]"
+            echo ""
+            echo "  mode:         quick | full | stress | realistic  (default: quick)"
+            echo "  --workers:    danh sách workers cách nhau bởi dấu phẩy  (default: 1,3,6)"
+            echo "                Hỗ trợ 1-6. Ví dụ: --workers=3,6"
+            echo "  --partitions: danh sách partitions, PHẢI tăng dần       (default: 3,6,12)"
+            echo "                Ví dụ: --partitions=6,12"
+            echo ""
+            echo "Ví dụ:"
+            echo "  bash run_scale_test.sh                           # full matrix, quick mode"
+            echo "  bash run_scale_test.sh full                      # full matrix, full benchmark"
+            echo "  bash run_scale_test.sh --workers=3,6 --partitions=6,12   # 4 runs"
+            echo "  bash run_scale_test.sh quick --workers=1 --partitions=3  # 1 run (baseline)"
+            exit 0
+            ;;
+        *) echo "Arg không nhận ra: $arg  (dùng --help)"; exit 1 ;;
+    esac
+done
+
+# Parse comma-separated arrays
+IFS=',' read -ra WORKER_STEPS    <<< "$WORKERS_ARG"
+IFS=',' read -ra PARTITION_STEPS <<< "$PARTITIONS_ARG"
+
+# Validate workers: chỉ hỗ trợ 1-6 vì docker-compose chỉ định nghĩa 6 workers
+for w in "${WORKER_STEPS[@]}"; do
+    if ! [[ "$w" =~ ^[1-6]$ ]]; then
+        echo "Lỗi: worker count '$w' không hợp lệ (hỗ trợ 1-6)"
+        exit 1
+    fi
+done
+
+# Đảm bảo partitions tăng dần (Kafka không thể giảm partition)
+prev=0
+for p in "${PARTITION_STEPS[@]}"; do
+    if [ "$p" -le "$prev" ]; then
+        echo "Lỗi: --partitions phải tăng dần, nhưng $p <= $prev"
+        echo "  Kafka không thể giảm số partition trong một session."
+        echo "  Hãy sắp xếp tăng dần, ví dụ: --partitions=3,6,12"
+        exit 1
+    fi
+    prev=$p
+done
+
 COMPOSE="docker compose"
-
-# Ma trận test — partitions PHẢI tăng dần (Kafka không giảm được partition)
-PARTITION_STEPS=(3 6 12)
-WORKER_STEPS=(1 3 6)
-
 TOTAL=$(( ${#PARTITION_STEPS[@]} * ${#WORKER_STEPS[@]} ))
 IDX=0
 
@@ -29,51 +79,81 @@ ok()   { echo -e "${C_GREEN}✓ $*${C_X}"; }
 warn() { echo -e "${C_YELLOW}⚠ $*${C_X}"; }
 err()  { echo -e "${C_RED}✗ $*${C_X}"; }
 
+# ── CPU budget ───────────────────────────────────────────────────────────
+# Tự tính SPARK_WORKER_CORES dựa trên số CPU thật để tránh oversubscription.
+# Reserve 4 cores cho các service IO-bound (Kafka, MySQL, MongoDB, Redis, Debezium).
+# Mục tiêu: workers × cores ≈ SPARK_BUDGET và ≤ 4 cores/worker (sweet spot).
+PHYSICAL_CORES=$(nproc 2>/dev/null || echo 16)
+SPARK_BUDGET=$(( PHYSICAL_CORES - 4 ))
+[ "$SPARK_BUDGET" -lt 2 ] && SPARK_BUDGET=2
+
+cores_for_workers() {
+    local n=$1
+    local c=$(( SPARK_BUDGET / n ))
+    [ "$c" -lt 1 ] && c=1
+    [ "$c" -gt 4 ] && c=4
+    echo "$c"
+}
+
 # ── Worker management ────────────────────────────────────────────────────
 set_workers() {
     local n=$1
-    log "Set Spark workers = $n"
+    local cores; cores=$(cores_for_workers "$n")
+    local total=$(( n * cores ))
 
-    case $n in
-        1)
-            $COMPOSE stop spark-worker-2 spark-worker-3 2>/dev/null || true
-            $COMPOSE --profile scale-workers stop \
-                spark-worker-4 spark-worker-5 spark-worker-6 2>/dev/null || true
-            ;;
-        3)
-            $COMPOSE start spark-worker-2 spark-worker-3
-            $COMPOSE --profile scale-workers stop \
-                spark-worker-4 spark-worker-5 spark-worker-6 2>/dev/null || true
-            ;;
-        6)
-            $COMPOSE start spark-worker-2 spark-worker-3
-            $COMPOSE --profile scale-workers up -d \
-                spark-worker-4 spark-worker-5 spark-worker-6
-            ;;
-        *)
-            err "Worker count không hợp lệ: $n (chỉ hỗ trợ 1, 3, 6)"
-            exit 1
-            ;;
-    esac
+    log "Set Spark workers = $n × ${cores} cores/worker = ${total} total executor slots"
 
-    echo "Đợi Spark register workers (25s)..."
-    sleep 25
+    # Export để docker compose đọc từ environment khi tạo/recreate container.
+    # PHẢI dùng 'up -d --no-deps' (không phải 'start') để container được recreate
+    # với giá trị SPARK_WORKER_CORES mới — 'start' chỉ khởi động lại container cũ.
+    export SPARK_WORKER_CORES=$cores
 
-    # Verify worker count qua Spark Master API
+    # Luôn dừng workers 4-6 trước (chúng dùng profile scale-workers)
+    $COMPOSE --profile scale-workers stop \
+        spark-worker-4 spark-worker-5 spark-worker-6 2>/dev/null || true
+
+    # Xác định worker nào cần start / stop trong nhóm 1-3
+    local to_start=()
+    local to_stop=()
+    for i in 1 2 3; do
+        if [ "$i" -le "$n" ]; then
+            to_start+=("spark-worker-$i")
+        else
+            to_stop+=("spark-worker-$i")
+        fi
+    done
+
+    [ "${#to_stop[@]}" -gt 0 ] && $COMPOSE stop "${to_stop[@]}" 2>/dev/null || true
+
+    # up -d --no-deps: recreate container nếu env thay đổi, không recreate dependencies
+    $COMPOSE up -d --no-deps "${to_start[@]}"
+
+    # Nếu n > 3, khởi động workers 4 đến n trong profile scale-workers
+    if [ "$n" -ge 4 ]; then
+        local scale_workers=()
+        for i in $(seq 4 "$n"); do
+            scale_workers+=("spark-worker-$i")
+        done
+        $COMPOSE --profile scale-workers up -d --no-deps "${scale_workers[@]}"
+    fi
+
+    echo "Đợi Spark re-register workers (30s)..."
+    sleep 30
+
     local alive
     alive=$(curl -sf http://localhost:8080/json/ 2>/dev/null \
         | python3 -c "import sys,json; d=json.load(sys.stdin); print(len([w for w in d.get('workers',[]) if w.get('state')=='ALIVE']))" 2>/dev/null || echo "?")
-    ok "Spark workers ALIVE: $alive (target: $n)"
+    ok "Spark workers ALIVE: $alive (target: $n, cores/worker: $cores, total slots: $total)"
 }
 
 restore_all() {
-    log "Restore toàn bộ workers (cleanup)"
-    $COMPOSE start spark-worker-1 spark-worker-2 spark-worker-3 2>/dev/null || true
-    $COMPOSE --profile scale-workers up -d \
+    log "Restore về 3 workers mặc định (cleanup)"
+    unset SPARK_WORKER_CORES
+    $COMPOSE up -d --no-deps spark-worker-1 spark-worker-2 spark-worker-3 2>/dev/null || true
+    $COMPOSE --profile scale-workers stop \
         spark-worker-4 spark-worker-5 spark-worker-6 2>/dev/null || true
 }
 
-# Restore khi script kết thúc (kể cả lỗi)
 trap restore_all EXIT
 
 # ── Sanity check ─────────────────────────────────────────────────────────
@@ -91,12 +171,23 @@ fi
 
 ok "Stack đang chạy, bắt đầu scale test"
 
+# ── Hardware summary ──────────────────────────────────────────────────────
+echo ""
+echo "  Hardware : $(nproc) cores, $(free -m | awk '/^Mem:/{printf "%.0fGB", $2/1024}') RAM"
+echo "  SPARK_BUDGET: $(( PHYSICAL_CORES - 4 )) cores ($(nproc) physical − 4 reserved)"
+echo ""
+echo "  Cấu hình cores/worker:"
+for w in "${WORKER_STEPS[@]}"; do
+    c=$(cores_for_workers "$w")
+    printf "    %d workers × %d cores = %d executor slots\n" "$w" "$c" "$(( w * c ))"
+done
+
 # ── Print kế hoạch ───────────────────────────────────────────────────────
 echo ""
-echo "  Mode:       $MODE"
-echo "  Workers:    ${WORKER_STEPS[*]}"
-echo "  Partitions: ${PARTITION_STEPS[*]}"
-echo "  Tổng runs:  $TOTAL"
+echo "  Mode:        $MODE"
+echo "  Workers:     ${WORKER_STEPS[*]}"
+echo "  Partitions:  ${PARTITION_STEPS[*]}"
+echo "  Tổng runs:   $TOTAL"
 echo ""
 
 # ── Ma trận test ─────────────────────────────────────────────────────────
