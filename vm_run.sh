@@ -145,6 +145,7 @@ echo -e "${BOLD}═════════════════════�
 echo ""
 echo -e "  ${G}Demo dashboard${X}  : http://${VM_IP}:${DEMO_PORT}"
 echo -e "  ${G}Grafana${X}         : http://${VM_IP}:3000  (admin/admin)"
+echo -e "  ${G}Kafka UI${X}        : http://${VM_IP}:8090"
 echo -e "  ${G}Prometheus${X}      : http://${VM_IP}:9090"
 echo -e "  ${G}Spark UI${X}        : http://${VM_IP}:8080"
 echo ""

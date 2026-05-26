@@ -302,6 +302,22 @@ services:
       SPARK_WORKER_CORES: "${SPARK_WORKER_CORES:-4}"
       SPARK_WORKER_MEMORY: "${SPARK_WORKER_MEMORY:-4g}"
 
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: cdc-kafka-ui
+    networks:
+      - cdc-net
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: cdc-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: cdc-kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: cdc-zookeeper:2181
+      DYNAMIC_CONFIG_ENABLED: "true"
+
   metrics-exporter:
     build:
       context: ./monitoring/exporter
