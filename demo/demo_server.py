@@ -5,7 +5,7 @@ Run  : python demo_server.py   (sau khi: pip install -r requirements.txt)
 Open : http://localhost:8888
 """
 
-import os, sys, json, time, threading, random, subprocess
+import os, sys, json, time, threading, random, subprocess, statistics
 from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -145,6 +145,129 @@ def _load_worker(rate: int):
 
 
 # ── Fault tolerance state ────────────────────────────────────────────
+# ── Capacity stress test — configurable via .env ─────────────────────
+# VM example: STRESS_RATES=500,1000,2000,5000,10000  STRESS_DURATION=60
+STRESS_RATES    = [int(x) for x in os.getenv("STRESS_RATES",    "50,100,150,200,250,300,400").split(",")]
+STRESS_DURATION = int(os.getenv("STRESS_DURATION", "40"))   # seconds per level
+# lag > rate * SAT_RATIO → saturating (floor 50 to absorb jitter)
+STRESS_SAT_RATIO = float(os.getenv("STRESS_SAT_RATIO", "0.5"))
+
+_stress_state: dict = {
+    "running":         False,
+    "phase":           "idle",   # idle | running | done
+    "current_level":   -1,
+    "current_rate":    0,
+    "levels":          STRESS_RATES,
+    "duration_s":      STRESS_DURATION,
+    "sat_ratio":       STRESS_SAT_RATIO,
+    "results":         [],
+    "saturation_rate": None,
+}
+_stress_lock = threading.Lock()
+
+
+def _get_prometheus_metric(name: str):
+    try:
+        url = f"{PROM_URL}/api/v1/query?query={name}"
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            data = json.loads(resp.read())
+        rs = data.get("data", {}).get("result", [])
+        return float(rs[0]["value"][1]) if rs else None
+    except Exception:
+        return None
+
+
+def _stress_worker():
+    for level_idx, rate in enumerate(STRESS_RATES):
+        with _stress_lock:
+            if not _stress_state["running"]:
+                break
+            _stress_state["current_level"] = level_idx
+            _stress_state["current_rate"]  = rate
+
+        # Stop previous injection then wait for thread to exit
+        with _lock:
+            _state["running"] = False
+        time.sleep(2)
+
+        lag_before = _get_prometheus_metric("cdc_lag_total") or 0.0
+
+        # Start injection at this rate
+        with _lock:
+            _state.update(running=True, rate=rate, injected=0, errors=0, start_ts=time.time())
+            t = threading.Thread(target=_load_worker, args=(rate,), daemon=True)
+            _state["thread"] = t
+        t.start()
+
+        # Warm-up 10s, then sample every 5s for remaining duration
+        time.sleep(10)
+        batch_samples, consumer_lag_samples, inject_samples = [], [], []
+        mongo_rate_samples, kafka_rate_samples = [], []
+        sample_count = (STRESS_DURATION - 10) // 5
+        for _ in range(sample_count):
+            with _stress_lock:
+                if not _stress_state["running"]:
+                    break
+            # cdc_kafka_consumer_lag: delta(kafka_events) - delta(mongo_writes) per 5s window
+            # more accurate than cdc_lag_total for saturation detection
+            c_lag    = _get_prometheus_metric("cdc_kafka_consumer_lag") or 0.0
+            batch_ms = _get_prometheus_metric("cdc_spark_batch_duration_ms") or 0.0
+            inj_r    = _get_prometheus_metric("cdc_mysql_insert_rate") or 0.0
+            mongo_r  = _get_prometheus_metric("cdc_mongo_write_rate") or 0.0
+            kafka_r  = _get_prometheus_metric("cdc_kafka_rate_total") or 0.0
+            consumer_lag_samples.append(c_lag)
+            if batch_ms > 0: batch_samples.append(batch_ms)
+            if inj_r   > 0: inject_samples.append(inj_r)
+            if mongo_r > 0: mongo_rate_samples.append(mongo_r)
+            if kafka_r > 0: kafka_rate_samples.append(kafka_r)
+            time.sleep(5)
+
+        with _stress_lock:
+            if not _stress_state["running"]:
+                break
+
+        avg_consumer_lag = statistics.mean(consumer_lag_samples) if consumer_lag_samples else 0.0
+
+        # Rate-relative threshold: configurable via STRESS_SAT_RATIO (default 0.5).
+        # lag > rate * SAT_RATIO means Spark is more than SAT_RATIO seconds behind.
+        # Floor at 50 to absorb normal jitter.
+        sat_threshold = max(50.0, rate * STRESS_SAT_RATIO)
+
+        # Secondary signal: lag growing monotonically over the last 3 samples
+        trending_up = (
+            len(consumer_lag_samples) >= 3
+            and all(
+                consumer_lag_samples[i] < consumer_lag_samples[i + 1]
+                for i in range(len(consumer_lag_samples) - 3, len(consumer_lag_samples) - 1)
+            )
+        )
+        saturating = avg_consumer_lag > sat_threshold or (avg_consumer_lag > 20 and trending_up)
+
+        result = {
+            "rate":               rate,
+            "avg_consumer_lag":   round(avg_consumer_lag, 1),
+            "sat_threshold":      sat_threshold,
+            "avg_batch_ms":       int(statistics.mean(batch_samples))         if batch_samples         else 0,
+            "avg_inject_rate":    round(statistics.mean(inject_samples), 1)    if inject_samples        else 0.0,
+            "avg_mongo_rate":     round(statistics.mean(mongo_rate_samples), 1) if mongo_rate_samples   else 0.0,
+            "avg_kafka_rate":     round(statistics.mean(kafka_rate_samples), 1) if kafka_rate_samples   else 0.0,
+            "saturating":         saturating,
+        }
+        with _stress_lock:
+            _stress_state["results"].append(result)
+            if saturating and _stress_state["saturation_rate"] is None:
+                _stress_state["saturation_rate"] = rate
+
+    # Done — stop injection
+    with _lock:
+        _state["running"] = False
+        _state["start_ts"] = None
+    with _stress_lock:
+        _stress_state["running"] = False
+        _stress_state["phase"]   = "done"
+
+
 _ft_state: dict = {
     "phase": "idle",       # idle | running | recovered | failed
     "scenario": None,
@@ -158,15 +281,35 @@ _ft_state: dict = {
 }
 _ft_lock = threading.Lock()
 
-_SPARK_SUBMIT = (
-    "docker exec -d cdc-spark-master /opt/spark/bin/spark-submit"
-    " --class CdcRedisConsumer"
-    " --master spark://cdc-spark-master:7077"
-    " --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,"
+_SPARK_PACKAGES = (
+    "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,"
     "org.mongodb.spark:mongo-spark-connector_2.12:10.3.0,"
     "redis.clients:jedis:5.1.0"
-    " /opt/spark/jobs/cdc-mysql-to-mongodb-redis_2.12-1.0.jar"
 )
+
+# Current Spark resource config — modified via /api/spark/resubmit
+_spark_config: dict = {
+    "total_executor_cores": None,   # None = use all available (default)
+    "executor_memory":      None,   # None = worker default (e.g. "2g")
+}
+_spark_config_lock = threading.Lock()
+
+
+def _build_spark_submit(extra_args: str = "") -> list:
+    with _spark_config_lock:
+        cores  = _spark_config["total_executor_cores"]
+        memory = _spark_config["executor_memory"]
+    cmd = [
+        "docker", "exec", "-d", "cdc-spark-master",
+        "/opt/spark/bin/spark-submit",
+        "--class",  "CdcRedisConsumer",
+        "--master", "spark://cdc-spark-master:7077",
+        "--packages", _SPARK_PACKAGES,
+    ]
+    if cores:  cmd += ["--total-executor-cores", str(cores)]
+    if memory: cmd += ["--executor-memory", memory]
+    cmd.append("/opt/spark/jobs/cdc-mysql-to-mongodb-redis_2.12-1.0.jar")
+    return cmd
 
 
 def _ft_log(event: str, detail: str, level: str = "info"):
@@ -385,7 +528,7 @@ def _run_spark_scenario():
     _ft_log("RECOVER", "Re-submitting Spark job with existing checkpoint…", "info")
     fault_start = time.time()
 
-    subprocess.run(_SPARK_SUBMIT.split(), capture_output=True, timeout=15)
+    subprocess.run(_build_spark_submit(), capture_output=True, timeout=15)
     _ft_log("STATUS", "Spark job re-submitted — reading from checkpoint offset, no reprocessing", "info")
 
     # Wait for Spark packages download + first batch (can take ~30-90s on first submit after recreate)
@@ -582,6 +725,61 @@ def api_comparison():
         return jsonify({"ok": False, "error": str(e), "mysql_count": 0, "mysql": [], "mongo": []})
 
 
+def _kafka_partition_count(topic: str) -> int:
+    """Query partition count of a Kafka topic via docker exec (no extra deps)."""
+    try:
+        r = subprocess.run(
+            ["docker", "exec", "cdc-kafka", "/bin/kafka-topics",
+             "--describe", "--topic", topic, "--bootstrap-server", "localhost:9092"],
+            capture_output=True, text=True, timeout=6,
+        )
+        for line in r.stdout.splitlines():
+            if "PartitionCount:" in line:
+                return int(line.split("PartitionCount:")[1].split()[0])
+    except Exception:
+        pass
+    return -1
+
+
+def _spark_info() -> dict:
+    """Fetch worker/executor info from Spark Master REST API."""
+    for url in [f"http://{os.getenv('SPARK_MASTER_HOST', 'localhost')}:8080/json/",
+                "http://localhost:8080/json/"]:
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url), timeout=3) as r:
+                data = json.loads(r.read())
+            workers = [w for w in data.get("workers", []) if w.get("state") == "ALIVE"]
+            return {
+                "worker_count":  len(workers),
+                "cores_per_worker": workers[0].get("cores", 0) if workers else 0,
+                "mem_per_worker_mb": workers[0].get("memory", 0) if workers else 0,
+                "total_cores": sum(w.get("cores", 0) for w in workers),
+            }
+        except Exception:
+            continue
+    return {"worker_count": 0, "cores_per_worker": 0, "mem_per_worker_mb": 0, "total_cores": 0}
+
+
+@app.route("/api/test_config")
+def api_test_config():
+    """Return current hardware/pipeline config so UI can show what's being tested."""
+    customers_parts = _kafka_partition_count("inventory.inventory.customers")
+    orders_parts    = _kafka_partition_count("inventory.inventory.orders")
+    spark           = _spark_info()
+    return jsonify({
+        "kafka": {
+            "customers_partitions": customers_parts,
+            "orders_partitions":    orders_parts,
+        },
+        "spark": spark,
+        "stress": {
+            "rates":      STRESS_RATES,
+            "duration_s": STRESS_DURATION,
+            "sat_ratio":  STRESS_SAT_RATIO,
+        },
+    })
+
+
 def _detect_engine() -> str:
     for url in [f"http://{os.getenv('SPARK_MASTER_HOST', 'localhost')}:8080/json/",
                 "http://localhost:8080/json/"]:
@@ -687,6 +885,42 @@ def api_ft_inject():
     return jsonify({"ok": True, "scenario": scenario})
 
 
+# ── Spark resource config API ────────────────────────────────────────
+@app.route("/api/spark/config", methods=["GET"])
+def api_spark_config():
+    with _spark_config_lock:
+        cfg = dict(_spark_config)
+    cfg.update(_spark_info())
+    return jsonify({"ok": True, **cfg})
+
+
+@app.route("/api/spark/resubmit", methods=["POST"])
+def api_spark_resubmit():
+    """Kill current Spark job and resubmit with new resource config."""
+    body = request.get_json(silent=True) or {}
+    cores  = body.get("total_executor_cores")   # int or null
+    memory = body.get("executor_memory")         # "2g" / "4g" or null
+
+    with _spark_config_lock:
+        _spark_config["total_executor_cores"] = int(cores)  if cores  else None
+        _spark_config["executor_memory"]      = str(memory) if memory else None
+
+    # Kill existing job
+    subprocess.run(
+        ["docker", "exec", "cdc-spark-master", "pkill", "-f", "CdcRedisConsumer"],
+        capture_output=True, timeout=10,
+    )
+    time.sleep(2)
+
+    # Resubmit with new params
+    cmd = _build_spark_submit()
+    subprocess.run(cmd, capture_output=True, timeout=15)
+
+    with _spark_config_lock:
+        applied = dict(_spark_config)
+    return jsonify({"ok": True, "applied": applied, "cmd": " ".join(cmd)})
+
+
 @app.route("/api/ft/reset", methods=["POST"])
 def api_ft_reset():
     with _ft_lock:
@@ -770,6 +1004,38 @@ def api_update_order():
         return jsonify({"ok": True, "affected": affected, "new_status": new_status})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
+
+
+# ── Capacity Stress Test API ─────────────────────────────────────────
+@app.route("/api/stress/start", methods=["POST"])
+def api_stress_start():
+    with _stress_lock:
+        if _stress_state["running"]:
+            return jsonify({"ok": False, "reason": "already running"})
+        _stress_state.update(
+            running=True, phase="running",
+            current_level=-1, current_rate=0,
+            results=[], saturation_rate=None,
+        )
+    threading.Thread(target=_stress_worker, daemon=True).start()
+    return jsonify({"ok": True, "levels": STRESS_RATES, "duration_s": STRESS_DURATION, "sat_ratio": STRESS_SAT_RATIO})
+
+
+@app.route("/api/stress/stop", methods=["POST"])
+def api_stress_stop():
+    with _stress_lock:
+        _stress_state["running"] = False
+        _stress_state["phase"]   = "idle"
+    with _lock:
+        _state["running"] = False
+        _state["start_ts"] = None
+    return jsonify({"ok": True})
+
+
+@app.route("/api/stress/state", methods=["GET"])
+def api_stress_state():
+    with _stress_lock:
+        return jsonify(dict(_stress_state))
 
 
 if __name__ == "__main__":

@@ -79,6 +79,7 @@ def print_table(entries):
         ("Spark p95 ms",   "spark_p95_ms", 13),
         ("Kafka /s",       "kafka_rate",   10),
         ("Parts",          "partitions",    6),
+        ("Workers",        "spark_workers", 8),
         ("Bottleneck",     "bottleneck",   18),
     ]
 

@@ -447,7 +447,21 @@ footer {
 .phase-badge.recovered { background: rgba(115,191,105,.1); border-color: var(--green);  color: var(--green); }
 .phase-badge.failed    { background: rgba(255,152,48,.1);  border-color: var(--orange); color: var(--orange); }
 
-#tab-ft { flex-direction: column; gap: 14px; }
+#tab-ft     { flex-direction: column; gap: 14px; }
+#tab-stress { flex-direction: column; gap: 14px; }
+
+.stress-levels { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.stress-level-pill {
+  padding: 5px 14px; border-radius: 20px; font-size: 12px; font-weight: 700;
+  font-family: 'JetBrains Mono', monospace; border: 1px solid var(--border);
+  background: var(--surface); color: var(--dim); transition: all .2s;
+}
+.stress-level-pill.active   { background: rgba(37,99,235,.15); color: #60a5fa; border-color: rgba(37,99,235,.4); }
+.stress-level-pill.stable   { background: rgba(115,191,105,.12); color: var(--green); border-color: rgba(115,191,105,.3); }
+.stress-level-pill.sat      { background: rgba(242,73,92,.12); color: var(--red); border-color: rgba(242,73,92,.3); }
+.stress-metrics-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+.stress-result-sat  td { background: rgba(242,73,92,.04); }
+.stress-result-ok   td { background: rgba(115,191,105,.04); }
 
 /* ── Responsive ── */
 @media (max-width: 1100px) {
@@ -488,6 +502,7 @@ footer {
 <nav class="tab-nav">
   <button class="tab-btn active" data-tab="demo">📊 Live Demo</button>
   <button class="tab-btn" data-tab="ft">🛡 Fault Tolerance</button>
+  <button class="tab-btn" data-tab="stress">⚡ Capacity Test</button>
 </nav>
 
 <!-- ── Main ── -->
@@ -839,6 +854,134 @@ footer {
 
   </div><!-- end #tab-ft -->
 
+  <!-- ── Capacity Test Tab ── -->
+  <div id="tab-stress" style="display:none">
+
+    <!-- Test Config snapshot -->
+    <div class="chart-card" style="padding:14px 18px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--dim)">Config đang chạy</span>
+        <button onclick="loadTestConfig()" style="background:none;border:1px solid var(--border);color:var(--dim);padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px">↺ Refresh</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px" id="testConfigGrid">
+        <div class="ft-metric-pill" style="flex-direction:column;gap:3px;text-align:center">
+          <div class="fmp-v" id="cfgKafkaParts">—</div>
+          <div class="fmp-l">Kafka Partitions</div>
+        </div>
+        <div class="ft-metric-pill" style="flex-direction:column;gap:3px;text-align:center">
+          <div class="fmp-v" id="cfgSparkWorkers">—</div>
+          <div class="fmp-l">Spark Workers</div>
+        </div>
+        <div class="ft-metric-pill" style="flex-direction:column;gap:3px;text-align:center">
+          <div class="fmp-v" id="cfgSparkCores">—</div>
+          <div class="fmp-l">Total Cores</div>
+        </div>
+        <div class="ft-metric-pill" style="flex-direction:column;gap:3px;text-align:center">
+          <div class="fmp-v" id="cfgSparkMem">—</div>
+          <div class="fmp-l">Mem/Worker</div>
+        </div>
+      </div>
+      <!-- Spark Tuning -->
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);margin-bottom:8px">Spark Tuning — đổi giữa các lần test</div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <label style="font-size:12px;color:var(--dim)">Total Executor Cores
+            <select id="sparkCoresInput" style="margin-left:6px;background:var(--card);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:12px">
+              <option value="">Auto (tất cả)</option>
+              <option value="2">2 cores</option>
+              <option value="4">4 cores</option>
+              <option value="6">6 cores</option>
+              <option value="8">8 cores</option>
+              <option value="12">12 cores</option>
+            </select>
+          </label>
+          <label style="font-size:12px;color:var(--dim)">Executor Memory
+            <select id="sparkMemInput" style="margin-left:6px;background:var(--card);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:12px">
+              <option value="">Auto (worker default)</option>
+              <option value="512m">512m</option>
+              <option value="1g">1g</option>
+              <option value="2g">2g</option>
+              <option value="4g">4g</option>
+            </select>
+          </label>
+          <button onclick="resubmitSpark()" id="sparkResubmitBtn"
+            style="background:rgba(37,99,235,.15);border:1px solid rgba(37,99,235,.4);color:#60a5fa;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600">
+            ↺ Resubmit Spark Job
+          </button>
+          <span id="sparkResubmitStatus" style="font-size:11px;color:var(--dim)"></span>
+        </div>
+        <p style="font-size:10px;color:var(--dim);margin-top:8px;margin-bottom:0">
+          Kafka partitions / STRESS_RATES: đổi trong <code>.env.laptop</code> → <code>bash stop.sh -v &amp;&amp; bash start.sh</code>
+        </p>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="chart-card">
+      <div class="card-hdr">
+        <div class="card-title">⚡ Capacity Test — Tìm Điểm Bão Hòa</div>
+        <span id="stressPhaseBadge" class="phase-badge idle">● IDLE</span>
+      </div>
+      <p style="color:var(--dim);font-size:13px;line-height:1.6;margin-bottom:16px">
+        Tự động ramp inject: <strong style="color:var(--text)" id="stressRateLabel">100 → 200 → 500 → 1k → 2k rec/s</strong>, mỗi level <span id="stressDurLabel">40</span>s.<br>
+        Đo Kafka lag và Spark batch time để tìm điểm pipeline bắt đầu không theo kịp.<br>
+        <span style="font-size:11px">Bão hòa khi lag &gt; max(50, rate × <span id="stressSatRatioLabel">0.5</span>) hoặc lag tăng liên tục 3 mẫu.</span>
+      </p>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="start-btn" id="stressRunBtn" onclick="startStress()">
+          <span>▶</span> RUN CAPACITY TEST (~3.5 phút)
+        </button>
+        <button class="clear-btn" id="stressStopBtn" style="display:none" onclick="stopStress()">
+          ⏹ STOP
+        </button>
+      </div>
+
+      <!-- Level progress (visible while running) -->
+      <div id="stressProgress" style="display:none;margin-top:18px">
+        <div style="font-size:11px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Progress</div>
+        <div class="stress-levels" id="stressLevels"></div>
+        <div class="stress-metrics-row">
+          <div class="ft-metric-pill" style="flex-direction:column;gap:4px;text-align:center">
+            <div class="fmp-v" id="stressCurrentRate">—</div>
+            <div class="fmp-l">Inject Rate (rec/s)</div>
+          </div>
+          <div class="ft-metric-pill" style="flex-direction:column;gap:4px;text-align:center">
+            <div class="fmp-v" id="stressLiveLag">—</div>
+            <div class="fmp-l">Kafka Lag</div>
+          </div>
+          <div class="ft-metric-pill" style="flex-direction:column;gap:4px;text-align:center">
+            <div class="fmp-v" id="stressLiveBatch">—</div>
+            <div class="fmp-l">Spark Batch (ms)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results table (visible once ≥1 level done) -->
+    <div class="chart-card" id="stressResultsCard" style="display:none">
+      <div class="card-hdr">
+        <div class="card-title">📊 Kết Quả</div>
+        <span id="stressSatLabel" style="font-size:12px"></span>
+      </div>
+      <table class="data-tbl" style="width:100%">
+        <thead><tr>
+          <th>Rate Target</th>
+          <th>MySQL Inject</th>
+          <th>Kafka Rate</th>
+          <th>MongoDB Write</th>
+          <th>Consumer Lag</th>
+          <th>Spark Batch</th>
+          <th>Status</th>
+        </tr></thead>
+        <tbody id="stressResultsTbody"></tbody>
+      </table>
+      <p style="font-size:11px;color:var(--dim);margin-top:10px">
+        * Consumer Lag = số Kafka events/5s chưa được Spark xử lý kịp. Threshold = max(50, rate×0.5) — tăng theo rate để tránh false positive ở tốc độ cao.
+      </p>
+    </div>
+
+  </div><!-- end #tab-stress -->
+
 </main>
 
 <script>
@@ -1164,10 +1307,15 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const target = btn.dataset.tab;
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    $('tab-demo').style.display = target === 'demo' ? '' : 'none';
-    $('tab-ft').style.display   = target === 'ft'   ? 'flex' : 'none';
-    if (target === 'ft') { refreshFT(); ftPollInterval = ftPollInterval || setInterval(refreshFT, 2000); }
-    else                 { clearInterval(ftPollInterval); ftPollInterval = null; }
+    $('tab-demo').style.display   = target === 'demo'   ? ''     : 'none';
+    $('tab-ft').style.display     = target === 'ft'     ? 'flex' : 'none';
+    $('tab-stress').style.display = target === 'stress' ? 'flex' : 'none';
+    if (target === 'ft') {
+      refreshFT(); ftPollInterval = ftPollInterval || setInterval(refreshFT, 2000);
+    } else { clearInterval(ftPollInterval); ftPollInterval = null; }
+    if (target === 'stress') {
+      loadTestConfig(); refreshStress(); stressPollInterval = stressPollInterval || setInterval(refreshStress, 2000);
+    } else { clearInterval(stressPollInterval); stressPollInterval = null; }
   });
 });
 
@@ -1326,6 +1474,182 @@ async function refreshFT() {
     ftLastPhase = phase;
 
   } catch (err) { console.error('[refreshFT]', err); }
+}
+
+// ── Capacity Stress Test ─────────────────────────────────
+let stressPollInterval = null;
+let stressLastPhase    = 'idle';
+
+async function resubmitSpark() {
+  const cores  = $('sparkCoresInput').value  || null;
+  const memory = $('sparkMemInput').value    || null;
+  const label  = [cores ? `${cores} cores` : 'auto cores', memory ? memory : 'auto mem'].join(', ');
+  if (!confirm(`Resubmit Spark job với: ${label}?\nJob hiện tại sẽ bị kill (~5s downtime).`)) return;
+  $('sparkResubmitBtn').disabled = true;
+  $('sparkResubmitStatus').textContent = '⏳ Resubmitting...';
+  try {
+    const res = await fetch('/api/spark/resubmit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ total_executor_cores: cores ? parseInt(cores) : null, executor_memory: memory }),
+    });
+    const d = await res.json();
+    if (d.ok) {
+      $('sparkResubmitStatus').textContent = `✅ Submitted (${label}) — job khởi động ~30s`;
+      setTimeout(loadTestConfig, 5000);  // refresh config after job starts
+    } else {
+      $('sparkResubmitStatus').textContent = '❌ Lỗi: ' + (d.reason || 'unknown');
+    }
+  } catch (e) {
+    $('sparkResubmitStatus').textContent = '❌ ' + e.message;
+  }
+  $('sparkResubmitBtn').disabled = false;
+}
+
+async function loadTestConfig() {
+  try {
+    const res = await fetch('/api/test_config');
+    const d   = await res.json();
+    const k   = d.kafka  || {};
+    const sp  = d.spark  || {};
+    const st  = d.stress || {};
+    // Kafka partitions — warn if still 1 (not updated after .env change)
+    const parts = k.customers_partitions ?? -1;
+    const partsColor = parts === 1 ? 'var(--orange)' : parts > 1 ? 'var(--green)' : 'var(--dim)';
+    $('cfgKafkaParts').innerHTML = parts > 0
+      ? `<span style="color:${partsColor}">${parts}</span>`
+      : '<span style="color:var(--dim)">—</span>';
+    // Spark
+    $('cfgSparkWorkers').textContent = sp.worker_count  > 0 ? sp.worker_count  : '—';
+    $('cfgSparkCores').textContent   = sp.total_cores   > 0 ? sp.total_cores   : '—';
+    $('cfgSparkMem').textContent     = sp.mem_per_worker_mb > 0 ? `${(sp.mem_per_worker_mb/1024).toFixed(1)}g` : '—';
+    // Stress rates
+    if (st.rates) {
+      const label = st.rates.map(r => r >= 1000 ? `${r/1000}k` : `${r}`).join(' → ') + ' rec/s';
+      $('stressRateLabel').textContent = label;
+    }
+    if (st.duration_s)  $('stressDurLabel').textContent      = st.duration_s;
+    if (st.sat_ratio)   $('stressSatRatioLabel').textContent = st.sat_ratio;
+  } catch (e) { console.error('[loadTestConfig]', e); }
+}
+
+async function startStress() {
+  if (!confirm('Bắt đầu capacity test? Tự động inject ở nhiều tốc độ khác nhau.')) return;
+  $('stressRunBtn').disabled = true;
+  const res = await fetch('/api/stress/start', { method: 'POST' });
+  const d   = await res.json();
+  if (!d.ok) { alert('Lỗi: ' + d.reason); $('stressRunBtn').disabled = false; return; }
+  // Update UI labels with actual server config (may differ on VM)
+  if (d.levels) {
+    const label = d.levels.map(r => r >= 1000 ? `${r/1000}k` : `${r}`).join(' → ') + ' rec/s';
+    $('stressRateLabel').textContent = label;
+    const mins = Math.round(d.levels.length * (d.duration_s || 40) / 60 * 10) / 10;
+    $('stressRunBtn').querySelector('span').nextSibling.textContent = ` RUN CAPACITY TEST (~${mins} phút)`;
+  }
+  if (d.duration_s) $('stressDurLabel').textContent = d.duration_s;
+  if (d.sat_ratio)  $('stressSatRatioLabel').textContent = d.sat_ratio;
+  $('stressStopBtn').style.display = '';
+  stressPollInterval = stressPollInterval || setInterval(refreshStress, 2000);
+  refreshStress();
+}
+
+async function stopStress() {
+  await fetch('/api/stress/stop', { method: 'POST' });
+  $('stressRunBtn').disabled = false;
+  $('stressStopBtn').style.display = 'none';
+  clearInterval(stressPollInterval); stressPollInterval = null;
+  refreshStress();
+}
+
+async function refreshStress() {
+  try {
+    const res   = await fetch('/api/stress/state');
+    const state = await res.json();
+    const phase = state.phase;
+
+    // Badge
+    const badge = $('stressPhaseBadge');
+    if (badge) {
+      const phaseMap = { idle: ['idle','● IDLE'], running: ['running','● RUNNING'], done: ['recovered','● DONE'] };
+      const [cls, txt] = phaseMap[phase] || ['idle','● IDLE'];
+      badge.className  = `phase-badge ${cls}`;
+      badge.textContent = txt;
+    }
+
+    // Level pills
+    const levels   = state.levels || [];
+    const curLevel = state.current_level;
+    const results  = state.results || [];
+    const levelsEl = $('stressLevels');
+    if (levelsEl && levels.length) {
+      levelsEl.innerHTML = levels.map((r, i) => {
+        const done   = results[i];
+        const active = i === curLevel && phase === 'running';
+        const label  = r >= 1000 ? `${r/1000}k/s` : `${r}/s`;
+        let cls = '';
+        if      (active)              cls = 'active';
+        else if (done && done.saturating) cls = 'sat';
+        else if (done)                cls = 'stable';
+        const icon = active ? '⟳ ' : (done && done.saturating ? '⚠ ' : (done ? '✓ ' : ''));
+        return `<span class="stress-level-pill ${cls}">${icon}${label}</span>`;
+      }).join('');
+    }
+
+    // Progress panel
+    const progressEl = $('stressProgress');
+    if (progressEl) progressEl.style.display = phase === 'running' ? '' : 'none';
+
+    if (phase === 'running') {
+      setTxt('stressCurrentRate', state.current_rate || '—', false);
+      try {
+        const mres = await fetch('/api/metrics');
+        const m    = await mres.json();
+        setTxt('stressLiveLag',   fmt(m.cdc_lag_total),                                            false);
+        setTxt('stressLiveBatch', m.cdc_spark_batch_duration_ms ? fmt(m.cdc_spark_batch_duration_ms) + 'ms' : '—', false);
+      } catch (e) {}
+    }
+
+    // Results table
+    const tbody = $('stressResultsTbody');
+    const card  = $('stressResultsCard');
+    if (results.length > 0 && tbody && card) {
+      card.style.display = '';
+      tbody.innerHTML = results.map(r => {
+        const rowCls    = r.saturating ? 'stress-result-sat' : 'stress-result-ok';
+        const satIcon   = r.saturating ? '⚠ Saturating' : '✅ Stable';
+        const threshold = r.sat_threshold || Math.max(50, r.rate * 0.5);
+        const lagColor  = r.avg_consumer_lag > threshold ? 'var(--red)' : r.avg_consumer_lag > threshold * 0.4 ? 'var(--orange)' : 'var(--green)';
+        const rateLabel = r.rate >= 1000 ? `${r.rate/1000}k/s` : `${r.rate}/s`;
+        return `<tr class="${rowCls}">
+          <td style="font-weight:700">${rateLabel}</td>
+          <td>${fmt(r.avg_inject_rate)}</td>
+          <td>${fmt(r.avg_kafka_rate)}</td>
+          <td>${fmt(r.avg_mongo_rate)}</td>
+          <td style="color:${lagColor}">${r.avg_consumer_lag} <span style="font-size:10px;opacity:.6">(>${threshold})</span></td>
+          <td>${fmt(r.avg_batch_ms)}ms</td>
+          <td>${satIcon}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    if (phase === 'done') {
+      $('stressRunBtn').disabled       = false;
+      $('stressStopBtn').style.display = 'none';
+      clearInterval(stressPollInterval); stressPollInterval = null;
+      const satRate  = state.saturation_rate;
+      const satLabel = $('stressSatLabel');
+      if (satLabel) {
+        if (satRate) {
+          satLabel.textContent = `⚠ Saturation ở ${satRate >= 1000 ? satRate/1000 + 'k' : satRate} rec/s — pipeline bắt đầu lag`;
+          satLabel.style.color = 'var(--orange)';
+        } else {
+          satLabel.textContent = '✅ Tất cả levels stable — pipeline xử lý kịp 2k rec/s';
+          satLabel.style.color = 'var(--green)';
+        }
+      }
+    }
+    stressLastPhase = phase;
+  } catch (e) { console.error('[refreshStress]', e); }
 }
 
 // ── Scene 1: Single Insert ───────────────────────────────

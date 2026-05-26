@@ -49,3 +49,4 @@ pipeline/volumes/
 secrets/
 tmp/
 *.tmp
+demo/recordings/

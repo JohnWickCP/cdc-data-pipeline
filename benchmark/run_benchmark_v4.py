@@ -421,10 +421,18 @@ def get_hardware():
         except Exception:
             return "N/A"
 
+    def ram_gb():
+        try:
+            # /proc/meminfo always works inside Docker (reflects host RAM)
+            line = open('/proc/meminfo').readline()  # "MemTotal:   16229552 kB"
+            return round(int(line.split()[1]) / 1024 / 1024, 1)
+        except Exception:
+            return 0.0
+
     return {
         "cpu_model": run("lscpu | grep 'Model name' | sed 's/.*:\\s*//'"),
         "cpu_cores": int(run("nproc") or "0"),
-        "ram_gb": round(int(run("free -m | awk '/^Mem:/{print $2}'") or "0") / 1024, 1),
+        "ram_gb": ram_gb(),
         "disk_free": run(f"df -h {PROJECT_DIR} | tail -1 | awk '{{print $4}}'"),
     }
 
@@ -450,32 +458,28 @@ def detect_spark_engine():
     return "unknown"
 
 
+def get_spark_worker_count():
+    """Lấy số Spark worker đang alive từ Spark Master API."""
+    import urllib.request, json as _json
+    urls = [SPARK_MASTER_URL, "http://localhost:8080/json/"]
+    for url in urls:
+        try:
+            with urllib.request.urlopen(url, timeout=3) as r:
+                data = _json.loads(r.read())
+            alive = [w for w in data.get("workers", []) if w.get("state") == "ALIVE"]
+            if alive:
+                return len(alive)
+        except Exception:
+            continue
+    return 0
+
+
 # ══════════════════════════════════════════════════════════
 # Partition mode
 # ══════════════════════════════════════════════════════════
 def change_partitions(num_partitions):
     """Đổi số partition cho Kafka topics."""
-    topics = [
-        "inventory.inventory.customers",
-        "inventory.inventory.orders"
-    ]
-    changed = False
-    for topic in topics:
-        try:
-            result = subprocess.run(
-                ["docker", "exec", "cdc-kafka", "kafka-topics",
-                 "--alter", "--bootstrap-server", "localhost:9092",
-                 "--topic", topic, "--partitions", str(num_partitions)],
-                capture_output=True, text=True, timeout=10
-            )
-            if result.returncode == 0:
-                info(f"  {topic} → {num_partitions} partitions")
-                changed = True
-            else:
-                warn(f"  {topic}: {result.stderr.strip()}")
-        except Exception as e:
-            warn(f"  Lỗi đổi partition {topic}: {e}")
-
+    changed = change_partitions_via_kafka(num_partitions)
     if changed:
         info("Đợi 10s cho Kafka rebalance...")
         time.sleep(10)
@@ -483,22 +487,39 @@ def change_partitions(num_partitions):
 
 
 def get_current_partitions():
-    """Lấy số partition hiện tại."""
+    """Lấy số partition hiện tại qua kafka-python (không cần docker exec)."""
     try:
-        result = subprocess.run(
-            ["docker", "exec", "cdc-kafka", "kafka-topics",
-             "--describe", "--bootstrap-server", "localhost:9092",
-             "--topic", "inventory.inventory.customers"],
-            capture_output=True, text=True, timeout=10
-        )
-        for line in result.stdout.split('\n'):
-            if 'PartitionCount' in line:
-                for part in line.split('\t'):
-                    if 'PartitionCount' in part:
-                        return int(part.split(':')[1].strip())
-        return 1
+        from kafka import KafkaConsumer
+        consumer = KafkaConsumer(bootstrap_servers='cdc-kafka:9092',
+                                 request_timeout_ms=5000,
+                                 api_version_auto_timeout_ms=3000)
+        partitions = consumer.partitions_for_topic('inventory.inventory.customers')
+        consumer.close()
+        return len(partitions) if partitions else 1
     except Exception:
         return 1
+
+
+def change_partitions_via_kafka(num_partitions):
+    """Tăng số partition qua kafka-python AdminClient (không cần docker exec)."""
+    try:
+        from kafka.admin import KafkaAdminClient, NewPartitions
+        admin = KafkaAdminClient(bootstrap_servers='cdc-kafka:9092',
+                                  request_timeout_ms=10000)
+        current = get_current_partitions()
+        if current >= num_partitions:
+            return True
+        topics = {
+            'inventory.inventory.customers': NewPartitions(total_count=num_partitions),
+            'inventory.inventory.orders':    NewPartitions(total_count=num_partitions),
+        }
+        admin.create_partitions(topics)
+        admin.close()
+        time.sleep(5)
+        return True
+    except Exception as e:
+        warn(f"  Lỗi đổi partition: {e}")
+        return False
 
 
 # ══════════════════════════════════════════════════════════
@@ -628,14 +649,16 @@ def main():
     # Spark info
     sm = sample_metrics()
     spark_engine = detect_spark_engine()
+    spark_worker_count = get_spark_worker_count()
     spark_info = {
         "executor_cores": int(sm.get('spark_cores', 0)),
         "executor_memory_mb": int(sm.get('spark_mem', 0)),
         "kafka_partitions": current_partitions,
         "engine": spark_engine,
+        "worker_count": spark_worker_count,
     }
     info(f"Spark cores: {spark_info['executor_cores']}, Memory: {spark_info['executor_memory_mb']}MB")
-    info(f"Spark engine: {spark_engine.upper()}")
+    info(f"Spark workers: {spark_worker_count}, Engine: {spark_engine.upper()}")
 
     # Warmup
     step("Khởi động nóng (10s, 5 records/s)")
@@ -785,6 +808,7 @@ def main():
         "spark_p99_ms":  sustained_result.get("spark_batch_p99_ms"),
         "kafka_rate":    sustained_result.get("kafka_rate_avg"),
         "partitions":    current_partitions,
+        "spark_workers": spark_worker_count,
         "bottleneck":    bottleneck["stage"] if bottleneck else None,
         "result_file":   str(result_file.name),
     }

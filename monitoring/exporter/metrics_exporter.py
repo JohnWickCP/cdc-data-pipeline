@@ -317,7 +317,7 @@ def collect_kafka():
                 for p in partitions:
                     tp = TopicPartition(topic, p)
                     end = consumer.end_offsets([tp])[tp]
-                    offsets[topic] = end
+                    offsets[topic] = offsets.get(topic, 0) + end  # sum all partitions
 
         consumer.close()
 
