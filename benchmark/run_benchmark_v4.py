@@ -488,38 +488,43 @@ def change_partitions(num_partitions):
 
 def get_current_partitions():
     """Lấy số partition hiện tại qua kafka-python (không cần docker exec)."""
-    try:
-        from kafka import KafkaConsumer
-        consumer = KafkaConsumer(bootstrap_servers='cdc-kafka:9092',
-                                 request_timeout_ms=5000,
-                                 api_version_auto_timeout_ms=3000)
-        partitions = consumer.partitions_for_topic('inventory.inventory.customers')
-        consumer.close()
-        return len(partitions) if partitions else 1
-    except Exception:
-        return 1
+    from kafka import KafkaConsumer
+    for servers in ['localhost:9092', 'cdc-kafka:9092']:
+        try:
+            consumer = KafkaConsumer(bootstrap_servers=servers,
+                                     request_timeout_ms=5000,
+                                     api_version_auto_timeout_ms=3000)
+            partitions = consumer.partitions_for_topic('inventory.inventory.customers')
+            consumer.close()
+            return len(partitions) if partitions else 1
+        except Exception:
+            continue
+    return 1
 
 
 def change_partitions_via_kafka(num_partitions):
     """Tăng số partition qua kafka-python AdminClient (không cần docker exec)."""
-    try:
-        from kafka.admin import KafkaAdminClient, NewPartitions
-        admin = KafkaAdminClient(bootstrap_servers='cdc-kafka:9092',
-                                  request_timeout_ms=10000)
-        current = get_current_partitions()
-        if current >= num_partitions:
+    from kafka.admin import KafkaAdminClient, NewPartitions
+    for servers in ['localhost:9092', 'cdc-kafka:9092']:
+        try:
+            admin = KafkaAdminClient(bootstrap_servers=servers,
+                                     request_timeout_ms=10000)
+            current = get_current_partitions()
+            if current >= num_partitions:
+                admin.close()
+                return True
+            topics = {
+                'inventory.inventory.customers': NewPartitions(total_count=num_partitions),
+                'inventory.inventory.orders':    NewPartitions(total_count=num_partitions),
+            }
+            admin.create_partitions(topics)
+            admin.close()
+            time.sleep(5)
             return True
-        topics = {
-            'inventory.inventory.customers': NewPartitions(total_count=num_partitions),
-            'inventory.inventory.orders':    NewPartitions(total_count=num_partitions),
-        }
-        admin.create_partitions(topics)
-        admin.close()
-        time.sleep(5)
-        return True
-    except Exception as e:
-        warn(f"  Lỗi đổi partition: {e}")
-        return False
+        except Exception as e:
+            warn(f"  Lỗi đổi partition (servers={servers}): {e}")
+            continue
+    return False
 
 
 # ══════════════════════════════════════════════════════════
@@ -536,14 +541,20 @@ def preflight():
         err(f"Metrics exporter không chạy ({METRICS_URL})")
         sys.exit(1)
 
-    try:
-        r = requests.get(SPARK_MASTER_URL, timeout=2)
-        active = len(r.json().get('activeapps', []))
-        if active == 0:
-            err("Không có Spark app đang chạy")
-            sys.exit(1)
-        ok(f"Spark app active ({active})")
-    except Exception:
+    spark_ok = False
+    for url in [SPARK_MASTER_URL, "http://localhost:8080/json/"]:
+        try:
+            r = requests.get(url, timeout=2)
+            active = len(r.json().get('activeapps', []))
+            if active == 0:
+                err("Không có Spark app đang chạy")
+                sys.exit(1)
+            ok(f"Spark app active ({active})")
+            spark_ok = True
+            break
+        except Exception:
+            continue
+    if not spark_ok:
         err("Spark master không truy cập được")
         sys.exit(1)
 
