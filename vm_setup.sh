@@ -41,20 +41,24 @@ if [ -z "$PYTHON" ]; then
 fi
 ok "Python: $($PYTHON --version)"
 
-log "Cài Python dependencies (Flask, pymysql, pymongo, redis)..."
+log "Cài Python dependencies..."
 $PYTHON -m pip install --quiet --break-system-packages \
     flask>=2.3.0 \
     pymysql>=1.1.0 \
     cryptography>=42.0 \
     pymongo>=4.6.0 \
     redis>=5.0.0 \
+    kafka-python>=2.0.0 \
+    requests>=2.28.0 \
     2>/dev/null || \
 $PYTHON -m pip install --quiet \
     flask>=2.3.0 \
     pymysql>=1.1.0 \
     cryptography>=42.0 \
     pymongo>=4.6.0 \
-    redis>=5.0.0
+    redis>=5.0.0 \
+    kafka-python>=2.0.0 \
+    requests>=2.28.0
 ok "Python packages installed"
 
 # ── 3. Các tool phụ ─────────────────────────────────────────────────────
@@ -64,6 +68,36 @@ if ! command -v nc &>/dev/null; then
     ok "netcat installed"
 else
     ok "netcat đã có"
+fi
+
+log "Kiểm tra btop (live resource monitor cho demo)..."
+if ! command -v btop &>/dev/null; then
+    sudo apt-get update -qq && sudo apt-get install -y btop -qq
+    ok "btop đã cài"
+else
+    ok "btop đã có"
+fi
+
+# ── 3b. Swap ─────────────────────────────────────────────────────────────
+# Cần thiết khi chạy 6 Spark workers trên VM 32GB — tránh OOM nếu GC spike.
+log "Kiểm tra swap..."
+if swapon --show 2>/dev/null | grep -q .; then
+    ok "Swap đã có: $(free -h | awk '/^Swap/{print $2}')"
+else
+    SWAPFILE=/swapfile
+    if [ ! -f "$SWAPFILE" ]; then
+        log "Tạo swap 4GB..."
+        sudo fallocate -l 4G "$SWAPFILE"
+        sudo chmod 600 "$SWAPFILE"
+        sudo mkswap "$SWAPFILE" -q
+        sudo swapon "$SWAPFILE"
+        grep -q "$SWAPFILE" /etc/fstab \
+            || echo "$SWAPFILE none swap sw 0 0" | sudo tee -a /etc/fstab > /dev/null
+        ok "Swap 4GB đã tạo và kích hoạt (persist qua reboot)"
+    else
+        sudo swapon "$SWAPFILE" 2>/dev/null && ok "Swap file đã tồn tại, kích hoạt lại" \
+            || ok "Swap file đã có và đang active"
+    fi
 fi
 
 # ── 4. Demo env file ─────────────────────────────────────────────────────
