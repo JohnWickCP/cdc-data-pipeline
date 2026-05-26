@@ -50,3 +50,4 @@ secrets/
 tmp/
 *.tmp
 demo/recordings/
+CONTEXT.md
