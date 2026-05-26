@@ -605,6 +605,8 @@ def main():
     parser.add_argument('mode', nargs='?', default='full',
                         choices=list(MODES.keys()),
                         help='quick | full | stress | partition | realistic')
+    parser.add_argument('--partitions', type=int, default=None,
+                        help='Target Kafka partition count (dùng cho scale test)')
     args = parser.parse_args()
 
     cfg = MODES[args.mode]
@@ -634,6 +636,15 @@ def main():
     # Current partitions
     current_partitions = get_current_partitions()
     info(f"Kafka partitions hiện tại: {current_partitions}")
+
+    # --partitions override (dùng cho scale test, hoạt động ở mọi mode)
+    if args.partitions and args.partitions > current_partitions:
+        step(f"Đổi Kafka partitions → {args.partitions}")
+        change_partitions(args.partitions)
+        current_partitions = get_current_partitions()
+        ok(f"Partitions hiện tại: {current_partitions}")
+    elif args.partitions and args.partitions <= current_partitions:
+        info(f"Đã có {current_partitions} partitions (≥ {args.partitions}), không cần đổi")
 
     # Partition mode: đổi partition
     if args.mode == 'partition':

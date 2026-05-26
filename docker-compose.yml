@@ -242,6 +242,66 @@ services:
       SPARK_WORKER_CORES: "${SPARK_WORKER_CORES:-4}"
       SPARK_WORKER_MEMORY: "${SPARK_WORKER_MEMORY:-2g}"
 
+  spark-worker-4:
+    image: cdc-spark:3.5.0
+    container_name: cdc-spark-worker-4
+    networks:
+      - cdc-net
+    profiles:
+      - scale-workers
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    command: >
+      /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://cdc-spark-master:7077
+    ports:
+      - "8086:8081"
+    volumes:
+      - ./jobs:/opt/spark/jobs
+    environment:
+      SPARK_WORKER_CORES: "${SPARK_WORKER_CORES:-4}"
+      SPARK_WORKER_MEMORY: "${SPARK_WORKER_MEMORY:-4g}"
+
+  spark-worker-5:
+    image: cdc-spark:3.5.0
+    container_name: cdc-spark-worker-5
+    networks:
+      - cdc-net
+    profiles:
+      - scale-workers
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    command: >
+      /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://cdc-spark-master:7077
+    ports:
+      - "8087:8081"
+    volumes:
+      - ./jobs:/opt/spark/jobs
+    environment:
+      SPARK_WORKER_CORES: "${SPARK_WORKER_CORES:-4}"
+      SPARK_WORKER_MEMORY: "${SPARK_WORKER_MEMORY:-4g}"
+
+  spark-worker-6:
+    image: cdc-spark:3.5.0
+    container_name: cdc-spark-worker-6
+    networks:
+      - cdc-net
+    profiles:
+      - scale-workers
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    command: >
+      /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://cdc-spark-master:7077
+    ports:
+      - "8088:8081"
+    volumes:
+      - ./jobs:/opt/spark/jobs
+    environment:
+      SPARK_WORKER_CORES: "${SPARK_WORKER_CORES:-4}"
+      SPARK_WORKER_MEMORY: "${SPARK_WORKER_MEMORY:-4g}"
+
   metrics-exporter:
     build:
       context: ./monitoring/exporter
