@@ -481,8 +481,10 @@ def change_partitions(num_partitions):
     """Đổi số partition cho Kafka topics."""
     changed = change_partitions_via_kafka(num_partitions)
     if changed:
-        info("Đợi 10s cho Kafka rebalance...")
-        time.sleep(10)
+        # 60s: Kafka Structured Streaming consumer group rebalance thường mất 20-60s.
+        # 10s quá ngắn → benchmark đo trong khi Spark đang rebalance → TPS ảo thấp.
+        info("Đợi 60s cho Kafka rebalance + Spark partition discovery...")
+        time.sleep(60)
     return changed
 
 

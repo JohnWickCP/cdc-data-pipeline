@@ -146,6 +146,49 @@ set_workers() {
     ok "Spark workers ALIVE: $alive (target: $n, cores/worker: $cores, total slots: $total)"
 }
 
+# Đảm bảo Spark app đang chạy — restart nếu cần, đợi cho đến khi có executor thật
+ensure_spark_running() {
+    local apps
+    apps=$(curl -sf http://localhost:8080/json/ 2>/dev/null \
+        | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('activeapps',[])))" 2>/dev/null || echo "0")
+
+    if [ "$apps" -gt 0 ]; then
+        ok "Spark app active ($apps)"
+        # Đảm bảo checkpoint đã được commit ít nhất 1 batch (đợi thêm 15s)
+        sleep 15
+        return 0
+    fi
+
+    warn "Spark app không chạy — re-submit..."
+    # KHÔNG xóa checkpoint: re-submit với checkpoint cũ để tránh replay Kafka backlog.
+    # Nếu checkpoint mất (cdc-spark-master bị recreate) → Spark sẽ đọc từ earliest
+    # → run đó sẽ bị đánh dấu invalid bởi benchmark (replay scenario).
+    $COMPOSE exec -d spark-master /opt/spark/bin/spark-submit \
+        --class CdcRedisConsumer \
+        --master spark://cdc-spark-master:7077 \
+        --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.mongodb.spark:mongo-spark-connector_2.12:10.3.0,redis.clients:jedis:5.1.0 \
+        /opt/spark/jobs/cdc-mysql-to-mongodb-redis_2.12-1.0.jar 2>/dev/null
+
+    # Đợi app xuất hiện trong Spark UI (tối đa 90s)
+    local waited=0
+    while [ "$waited" -lt 90 ]; do
+        sleep 5
+        waited=$((waited + 5))
+        apps=$(curl -sf http://localhost:8080/json/ 2>/dev/null \
+            | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('activeapps',[])))" 2>/dev/null || echo "0")
+        [ "$apps" -gt 0 ] && break
+    done
+
+    if [ "$apps" -gt 0 ]; then
+        ok "Spark app re-started ($apps) sau ${waited}s"
+        # Đợi thêm 30s để Spark commit checkpoint đầu tiên và stabilize
+        echo "Đợi Spark commit batch đầu (30s)..."
+        sleep 30
+    else
+        warn "Spark app vẫn chưa active sau 90s — tiếp tục anyway (run này có thể invalid)"
+    fi
+}
+
 restore_all() {
     log "Restore về 3 workers mặc định (cleanup)"
     unset SPARK_WORKER_CORES
@@ -203,6 +246,7 @@ for partitions in "${PARTITION_STEPS[@]}"; do
         log "[$IDX/$TOTAL] workers=$workers × partitions=$partitions  (đã chạy ${ELAPSED}s)"
 
         set_workers "$workers"
+        ensure_spark_running
 
         if ! python3 benchmark/run_benchmark_v4.py "$MODE" --partitions "$partitions"; then
             warn "Benchmark thất bại tại workers=$workers × partitions=$partitions, tiếp tục..."
