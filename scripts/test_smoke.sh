@@ -291,10 +291,10 @@ fi
 section "10. Hardware Profiles"
 
 for p in laptop server vm; do
-    if [ -f ".env.$p" ]; then
-        pass "Profile exists: .env.$p"
+    if [ -f "config/.env.$p" ]; then
+        pass "Profile exists: config/.env.$p"
     else
-        fail "Profile missing: .env.$p"
+        fail "Profile missing: config/.env.$p"
     fi
 done
 
