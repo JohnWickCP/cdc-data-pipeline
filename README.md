@@ -389,6 +389,23 @@ Dashboard chính (`uid: cdc-pipeline-main`) gồm các panels:
 - **Spark executor**: cores và memory đang dùng
 - **Alert rules**: lag ≥ 100 (warning), lag ≥ 500 (critical), batch ≥ 5000ms (warning)
 
+### Screenshots
+
+**Pipeline chạy đầy đủ — 12 containers healthy:**
+![Full Pipeline Running](docs/screenshots/01-full-pipeline-running.png)
+
+**Spark Master UI — active streaming job:**
+![Spark Master UI](docs/screenshots/08-spark-master-ui.png)
+
+**Debezium connector RUNNING:**
+![Debezium Connector](docs/screenshots/03-debezium-connector-running.png)
+
+**Kafka CDC event — INSERT:**
+![Kafka CDC Insert Event](docs/screenshots/04-kafka-cdc-insert-event.png)
+
+**Redis — customer data sau CDC:**
+![Redis Customer Data](docs/screenshots/redis-cli-customer-data.png)
+
 ---
 
 ## 8. Giới hạn hiện tại
@@ -402,7 +419,7 @@ Dashboard chính (`uid: cdc-pipeline-main`) gồm các panels:
 | **8.3** | Spark checkpoint ở `/tmp` trong container | Mất checkpoint khi container bị xóa volume | Mount checkpoint ra host volume |
 | **8.4** | `ram_gb = 0` trong benchmark JSON | Metadata sai, không ảnh hưởng throughput | Docker API để đọc host RAM |
 | **8.5** | Benchmark inject single-threaded | Không test concurrent load | Multi-thread producer: `ThreadPoolExecutor` |
-| **8.6** | Latency per-record không đo được | Chỉ đo aggregate throughput | Thêm cột `created_at DATETIME(3)` vào MySQL |
+| **8.6** | ✅ Latency per-record đã đo được | `measure_e2e_latency()` trong benchmark: insert 1 probe → poll MongoDB → P50/P95/P99 | — |
 | **8.7** | Không có Schema Registry | Dùng JSON thuần — nếu schema đổi, Spark cần update code | Kafka Schema Registry + Avro serialization |
 | **8.8** | Không có TLS/auth cho Kafka và MongoDB | Phù hợp dev/test, không phù hợp production | SASL/SSL cho Kafka, auth cho MongoDB |
 | **8.9** | Demo server chạy trên host, không trong Docker | Phụ thuộc Python host environment | Dockerize demo server |

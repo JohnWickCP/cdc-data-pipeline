@@ -133,7 +133,7 @@ Row "Real-time Metrics" trong `cdc_fixed1.json` gồm: timeseries insert rate, K
 | 2 | Benchmark trên cloud VM | `docs/VM_SETUP.md` có hướng dẫn, nhưng chưa chạy thực tế |
 | 3 | Schema registry / Avro serialization | Hiện tại dùng JSON plain, không có schema registry |
 | 4 | TLS / authentication cho Kafka | Hiện tại plain text, phù hợp cho môi trường dev/test |
-| 5 | DELETE event CDC — Redis chưa xóa key | Debezium capture đúng, Scala job có xử lý DELETE, nhưng Redis không xóa key |
+| 5 | ✅ DELETE event CDC — Redis xóa/giảm counter đúng | Scala: `pipe.del(s"customer:$id")`, `pipe.zincrby(..., -1.0, ...)`. Python: `pipe.delete(key)`, `pipe.zincrby(..., -1, ...)`. Đã fix 2026-06-05. |
 | 6 | Multi-table CDC ngoài `customers` và `orders` | Hiện tại chỉ test 2 bảng |
 | 7 | Grafana alert khi lag > ngưỡng | ✅ `monitoring/grafana/provisioning/alerting/cdc_alerts.yml` — lag≥100(warn), lag≥500(critical), batch≥5000ms(warn) |
 | 8 | ✅ Spark batch duration metric thật | Đã fix 2026-05-17: `StreamingQueryListener` → Redis → exporter (Scala mode) |
@@ -184,3 +184,4 @@ KAFKA_NUM_PARTITIONS=1
 | 2026-05-07 | Phase 3: Grafana real-time panels, demo dashboard, benchmark history/compare, Grafana alert rules |
 | 2026-05-16 | Phase 4: Spark checkpoint volume, Redis AOF persistence, fault tolerance demo |
 | 2026-05-17 | Fix startup bug (partial containers skip `docker compose up -d`), thêm `cdc_kafka_consumer_lag` metric (delta-based) |
+| 2026-06-05 | Fix Scala + Python: gate `orders:revenue`, `zincrby top_customers` với op=c\|r; thêm `zincrby(-1)` vào DELETE branch cho orders |

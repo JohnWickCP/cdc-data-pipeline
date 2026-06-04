@@ -57,7 +57,8 @@ MONGO_URI = os.environ.get("MONGO_URI", "mongodb://127.0.0.1:27017")
 METRICS_URL = os.environ.get("METRICS_URL", "http://localhost:8000/metrics")
 SPARK_MASTER_URL = os.environ.get("SPARK_MASTER_URL", "http://cdc-spark-master:8080/json/")
 
-START_ID = 1_000_000
+START_ID     = 1_000_000
+PROBE_ID_BASE = 900_000   # Probe IDs for latency measurement (< START_ID, not cleaned by cleanup())
 
 # Colors
 class C:
@@ -412,6 +413,107 @@ def cleanup():
 
 
 # ══════════════════════════════════════════════════════════
+# E2E Latency — per-record P50/P95/P99
+# ══════════════════════════════════════════════════════════
+def measure_e2e_latency(n_probes=20):
+    """
+    Đo E2E latency per-record: MySQL INSERT → MongoDB document available.
+    Dùng PROBE_ID_BASE (900_000) để tránh conflict với benchmark records (1_000_000+).
+    Returns dict với P50/P95/P99 (ms), hoặc None nếu pipeline không hoạt động.
+    """
+    try:
+        conn = pymysql.connect(**MYSQL_CONFIG)
+        cur = conn.cursor()
+        mongo = pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=3000)["inventory"]
+    except Exception as e:
+        warn(f"  Không kết nối được MySQL/MongoDB để đo latency: {e}")
+        return None
+
+    # Xóa probe records cũ (cả MySQL lẫn MongoDB trực tiếp để không chờ CDC)
+    try:
+        cur.execute(
+            f"DELETE FROM customers WHERE id >= {PROBE_ID_BASE} AND id < {PROBE_ID_BASE + n_probes}"
+        )
+        for i in range(n_probes):
+            mongo["customers"].delete_one({"_id": PROBE_ID_BASE + i})
+        time.sleep(1)
+    except Exception:
+        pass
+
+    latencies = []
+    timeout_ms = 12_000  # 12s > 2× trigger interval (5s)
+
+    info(f"  Đang probe {n_probes} records (mỗi record chờ tối đa {timeout_ms}ms)...")
+
+    for i in range(n_probes):
+        probe_id = PROBE_ID_BASE + i
+
+        try:
+            t0 = time.time()
+            cur.execute(
+                f"INSERT INTO customers (id, name, email, phone) "
+                f"VALUES ({probe_id}, 'Probe{i}', 'probe{i}@bench.test', '0900000000') "
+                f"ON DUPLICATE KEY UPDATE name=VALUES(name)"
+            )
+        except Exception as e:
+            warn(f"  Probe {i}: INSERT lỗi — {e}")
+            continue
+
+        # Poll MongoDB 50ms/lần
+        found = False
+        while (time.time() - t0) * 1000 < timeout_ms:
+            try:
+                if mongo["customers"].find_one({"_id": probe_id}):
+                    latencies.append((time.time() - t0) * 1000)
+                    found = True
+                    break
+            except Exception:
+                pass
+            time.sleep(0.05)
+
+        if not found:
+            warn(f"  Probe {i}: timeout {timeout_ms}ms — record không đến MongoDB (pipeline đang bận?)")
+
+        time.sleep(0.1)  # Tránh dồn nhiều probe vào cùng batch
+
+    # Cleanup probe records
+    try:
+        cur.execute(
+            f"DELETE FROM customers WHERE id >= {PROBE_ID_BASE} AND id < {PROBE_ID_BASE + n_probes}"
+        )
+    except Exception:
+        pass
+    conn.close()
+
+    if not latencies:
+        err("  Không đo được latency nào — kiểm tra Spark job có đang chạy không")
+        return None
+
+    s = sorted(latencies)
+    n = len(s)
+
+    def pct(data, p):
+        idx = max(0, min(int(len(data) * p / 100), len(data) - 1))
+        return round(data[idx], 1)
+
+    result = {
+        "n_probes":   n_probes,
+        "n_measured": n,
+        "p50_ms":  pct(s, 50),
+        "p95_ms":  pct(s, 95),
+        "p99_ms":  pct(s, 99),
+        "avg_ms":  round(statistics.mean(s), 1),
+        "min_ms":  round(s[0], 1),
+        "max_ms":  round(s[-1], 1),
+    }
+
+    ok(f"  E2E Latency (n={n}/{n_probes}):  "
+       f"P50={result['p50_ms']}ms  P95={result['p95_ms']}ms  P99={result['p99_ms']}ms  "
+       f"avg={result['avg_ms']}ms")
+    return result
+
+
+# ══════════════════════════════════════════════════════════
 # Hardware info
 # ══════════════════════════════════════════════════════════
 def get_hardware():
@@ -692,6 +794,19 @@ def main():
     cleanup()
     ok("Xong")
 
+    # ── E2E Latency per-record ────────────────────────────
+    step("Đo E2E latency per-record (P50/P95/P99) — 20 probes")
+    latency_result = measure_e2e_latency(n_probes=20)
+    if latency_result:
+        print(f"  {C.DIM}P50:{C.X}  {latency_result['p50_ms']}ms")
+        print(f"  {C.DIM}P95:{C.X}  {latency_result['p95_ms']}ms")
+        print(f"  {C.DIM}P99:{C.X}  {latency_result['p99_ms']}ms")
+        print(f"  {C.DIM}Avg:{C.X}  {latency_result['avg_ms']}ms  |  Min: {latency_result['min_ms']}ms  Max: {latency_result['max_ms']}ms")
+        print(f"  {C.DIM}Note:{C.X} Bao gồm 1 trigger cycle Spark (5s). P50 thường 1–6s.")
+    else:
+        warn("  Bỏ qua latency measurement — xem lỗi ở trên")
+        latency_result = None
+
     # ── Ramp-up test ─────────────────────────────────────
     step("Đo E2E records/s thật — tăng dần tải")
 
@@ -795,6 +910,8 @@ def main():
 
         "spark_cluster": spark_info,
 
+        "e2e_latency": latency_result,
+
         "ramp_up": ramp_results,
 
         "sustained": sustained_result,
@@ -834,6 +951,9 @@ def main():
         "partitions":    current_partitions,
         "spark_workers": spark_worker_count,
         "bottleneck":    bottleneck["stage"] if bottleneck else None,
+        "e2e_p50_ms":    latency_result["p50_ms"] if latency_result else None,
+        "e2e_p95_ms":    latency_result["p95_ms"] if latency_result else None,
+        "e2e_p99_ms":    latency_result["p99_ms"] if latency_result else None,
         "result_file":   str(result_file.name),
     }
     with open(history_file, "a", encoding="utf-8") as hf:
@@ -859,6 +979,13 @@ def main():
     print(f"      Lag còn lại:      {sr['lag_remaining']}")
     print(f"      Spark p50/p95/p99: {sr['spark_batch_p50_ms']}/{sr['spark_batch_p95_ms']}/{sr['spark_batch_p99_ms']}ms")
     print(f"      Kafka partitions: {current_partitions}")
+
+    if latency_result:
+        print(f"\n  ⏱  E2E Latency per-record (n={latency_result['n_measured']}/{latency_result['n_probes']}):")
+        print(f"      P50: {latency_result['p50_ms']}ms")
+        print(f"      P95: {latency_result['p95_ms']}ms")
+        print(f"      P99: {latency_result['p99_ms']}ms")
+        print(f"      Avg: {latency_result['avg_ms']}ms  (Min {latency_result['min_ms']}ms / Max {latency_result['max_ms']}ms)")
 
     print(f"\n  📋 Cách đo: E2E = records đến MongoDB ÷ TỔNG thời gian (inject + drain)")
     print(f"  📂 Chi tiết: {result_file}")

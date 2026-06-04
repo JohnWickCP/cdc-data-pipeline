@@ -30,12 +30,12 @@ object CdcRedisConsumer {
     .add("before", recordSchema)
     .add("after", recordSchema)
 
-  val KAFKA_BROKERS    = "cdc-kafka:29092"   // 👈 Chỗ này của bạn chắc chắn đang bị ghi là localhost:29092
+  val KAFKA_BROKERS    = "cdc-kafka:29092"
   val KAFKA_TOPICS     = "inventory.inventory.customers,inventory.inventory.orders"
   val CHECKPOINT_PATH  = "/tmp/spark-checkpoint/cdc-pipeline"
-  val MONGO_URI        = "mongodb://cdc-mongodb:27017"  // 👈 Phải là cdc-mongodb
+  val MONGO_URI        = "mongodb://cdc-mongodb:27017"
   val MONGO_DB         = "inventory"
-  val REDIS_HOST       = "cdc-redis"                    // 👈 Phải là cdc-redis
+  val REDIS_HOST       = "cdc-redis"
   val REDIS_PORT       = 6379
 
   val decodeDecimalUDF = udf((encoded: String) => {
@@ -130,6 +130,7 @@ object CdcRedisConsumer {
               pipe.decr(s"orders:status:$status")
               pipe.decr("orders:total")
               pipe.incrByFloat("orders:revenue", -amount)
+              pipe.zincrby("top_customers:order_count", -1.0, s"customer:$customerId")
 
             } else {
 
@@ -144,10 +145,12 @@ object CdcRedisConsumer {
                 new ReplaceOptions().upsert(true)
               )
 
-              if (op == "c" || op == "r") pipe.incr("orders:total")
-              if (op == "c" || op == "r") pipe.incr(s"orders:status:$status")
-              pipe.incrByFloat("orders:revenue", amount)
-              pipe.zincrby("top_customers:order_count", 1.0, s"customer:$customerId")
+              if (op == "c" || op == "r") {
+                pipe.incr("orders:total")
+                pipe.incr(s"orders:status:$status")
+                pipe.incrByFloat("orders:revenue", amount)
+                pipe.zincrby("top_customers:order_count", 1.0, s"customer:$customerId")
+              }
             }
           }
         }

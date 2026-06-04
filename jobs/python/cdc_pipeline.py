@@ -220,8 +220,9 @@ def process_batch(batch_df, batch_id):
 
                     pipe.decr("orders:total")
                     pipe.decrbyfloat("orders:revenue", amount)
+                    pipe.zincrby("top_customers:order_count", -1, f"customer:{row['customer_id']}")
 
-                else:
+                elif op in ("c", "r"):
 
                     pipe.incr("orders:total")
 
