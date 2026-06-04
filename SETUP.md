@@ -73,13 +73,13 @@ bash stop.sh
 bash stop.sh -v
 
 # Kiểm tra pipeline (43 checks)
-bash test_smoke.sh
+bash scripts/test_smoke.sh
 
 # Benchmark E2E (quick ~3 phút)
-bash run_bench.sh
+bash scripts/run_bench.sh
 
 # Benchmark đầy đủ (~10 phút, dùng cho báo cáo)
-bash run_bench.sh full
+bash scripts/run_bench.sh full
 
 # So sánh các lần chạy benchmark
 python benchmark/compare_runs.py -n 5
@@ -127,7 +127,7 @@ bash start.sh --detect
 | `server` | 32 GB+ | 6 workers × 4g |
 | `vm` | cloud VM | 6 workers × 4g |
 
-Chỉnh thủ công bằng cách sửa `.env.laptop` / `.env.server` / `.env.vm` rồi chạy lại `bash start.sh`.
+Chỉnh thủ công bằng cách sửa `config/.env.laptop` / `config/.env.server` / `config/.env.vm` rồi chạy lại `bash start.sh`.
 
 ---
 

@@ -338,7 +338,7 @@ Chờ **3–5 phút**. Script tự động:
 ### Kiểm tra pipeline hoạt động
 
 ```bash
-bash test_smoke.sh
+bash scripts/test_smoke.sh
 # Kết quả mong đợi: 43/43 PASS
 ```
 
@@ -352,8 +352,8 @@ bash stop.sh -v       # Dừng + xóa hết data (reset hoàn toàn)
 ### Chạy benchmark
 
 ```bash
-bash run_bench.sh           # Quick mode (~3 phút)
-bash run_bench.sh full      # Full mode (~10 phút)
+bash scripts/run_bench.sh           # Quick mode (~3 phút)
+bash scripts/run_bench.sh full      # Full mode (~10 phút)
 python benchmark/compare_runs.py -n 5   # So sánh 5 runs gần nhất
 ```
 
@@ -436,14 +436,21 @@ Dashboard chính (`uid: cdc-pipeline-main`) gồm các panels:
 cdc-data-pipeline/
 │
 ├── 📄 docker-compose.yml          # 13 containers — toàn bộ stack
-├── 📄 .env.laptop                 # Config cho laptop (≤16GB RAM)
-├── 📄 .env.server                 # Config cho workstation (≥32GB RAM)
-├── 📄 .env.vm                     # Config cho cloud VM
-│
 ├── 🚀 start.sh                    # Khởi động pipeline (~3-5 phút)
 ├── 🛑 stop.sh                     # Dừng pipeline [-v để xóa data]
-├── ✅ test_smoke.sh               # Smoke test 43 checks
-├── 📊 run_bench.sh                # Chạy benchmark [quick|full|stress]
+│
+├── 📁 config/
+│   ├── .env.laptop                # Config cho laptop (≤16GB RAM)
+│   ├── .env.server                # Config cho workstation (≥32GB RAM)
+│   └── .env.vm                   # Config cho cloud VM
+│
+├── 📁 scripts/
+│   ├── test_smoke.sh              # Smoke test 43 checks
+│   ├── run_bench.sh               # Chạy benchmark [quick|full|stress]
+│   ├── run_scale_test.sh          # Ma trận scaling test (workers × partitions)
+│   └── vm/
+│       ├── vm_run.sh              # All-in-one launcher cho VM
+│       └── vm_setup.sh            # Cài đặt môi trường VM mới
 │
 ├── 📁 jobs/
 │   ├── cdc-mysql-to-mongodb-redis_2.12-1.0.jar  ← Scala JAR đã build sẵn

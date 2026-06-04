@@ -9,18 +9,18 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 :root {
-  --bg:      #0b0e17;
-  --surface: #131726;
-  --card:    #1c2033;
-  --card2:   #242840;
-  --border:  #2a2f4e;
-  --blue:    #5794f2;
-  --green:   #73bf69;
-  --orange:  #ff9830;
-  --red:     #f2495c;
-  --purple:  #b877d9;
-  --text:    #d8d9da;
-  --dim:     #8e8e8e;
+  --bg:      #f0f4f8;
+  --surface: #ffffff;
+  --card:    #f8fafc;
+  --card2:   #f1f5f9;
+  --border:  #cbd5e1;
+  --blue:    #2563eb;
+  --green:   #16a34a;
+  --orange:  #d97706;
+  --red:     #dc2626;
+  --purple:  #7c3aed;
+  --text:    #1e293b;
+  --dim:     #64748b;
   --r:       10px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -28,14 +28,14 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 
 /* ── Header ── */
 header {
-  background: linear-gradient(135deg, #131726 0%, #1a1f3a 100%);
+  background: linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%);
   border-bottom: 1px solid var(--border);
   padding: 14px 24px;
   display: flex;
   align-items: center;
   gap: 24px;
 }
-.hd-title h1 { font-size: 18px; font-weight: 800; color: #fff; letter-spacing: -0.5px; }
+.hd-title h1 { font-size: 18px; font-weight: 800; color: var(--text); letter-spacing: -0.5px; }
 .hd-title .sub {
   font-size: 11px; color: var(--dim); font-family: 'JetBrains Mono', monospace; margin-top: 1px;
 }
@@ -146,7 +146,7 @@ main { padding: 16px 24px; display: flex; flex-direction: column; gap: 14px; max
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 16px;
 }
 .card-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.card-title { font-size: 13px; font-weight: 600; color: #fff; }
+.card-title { font-size: 13px; font-weight: 600; color: var(--text); }
 .legend { display: flex; gap: 16px; }
 .leg { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--dim); }
 .leg-dot { width: 8px; height: 8px; border-radius: 50%; }
@@ -162,9 +162,9 @@ main { padding: 16px 24px; display: flex; flex-direction: column; gap: 14px; max
   text-align: left; padding: 5px 8px; color: var(--dim); font-size: 10px;
   text-transform: uppercase; letter-spacing: .5px; border-bottom: 1px solid var(--border);
 }
-.data-tbl td { padding: 6px 8px; border-bottom: 1px solid rgba(42,47,78,.5); }
+.data-tbl td { padding: 6px 8px; border-bottom: 1px solid rgba(203,213,225,.8); }
 .data-tbl tr:last-child td { border-bottom: none; }
-.data-tbl tr:hover td { background: rgba(87,148,242,.05); }
+.data-tbl tr:hover td { background: rgba(37,99,235,.06); }
 .id-c    { color: var(--blue); }
 .email-c { color: var(--dim); font-size: 11px; }
 
@@ -178,7 +178,7 @@ main { padding: 16px 24px; display: flex; flex-direction: column; gap: 14px; max
 .top-c { margin-top: 12px; }
 .top-row {
   display: flex; justify-content: space-between; padding: 5px 0;
-  border-bottom: 1px solid rgba(42,47,78,.5); font-size: 12px; font-family: 'JetBrains Mono', monospace;
+  border-bottom: 1px solid rgba(203,213,225,.8); font-size: 12px; font-family: 'JetBrains Mono', monospace;
 }
 .top-row:last-child { border-bottom: none; }
 .top-row .t-id    { color: var(--purple); }
@@ -298,7 +298,7 @@ footer {
 /* ── Tab navigation ── */
 .tab-nav {
   display: flex; gap: 6px; padding: 10px 24px 0;
-  background: linear-gradient(135deg, #131726 0%, #1a1f3a 100%);
+  background: linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%);
   border-bottom: 1px solid var(--border);
 }
 .tab-btn {
@@ -310,7 +310,7 @@ footer {
 .tab-btn:hover { color: var(--text); border-color: var(--border); }
 .tab-btn.active {
   background: var(--surface); border-color: var(--border);
-  color: #fff; border-bottom-color: var(--surface);
+  color: var(--blue); border-bottom-color: var(--surface);
 }
 
 /* ── Fault Tolerance tab ── */
@@ -325,7 +325,7 @@ footer {
 .ft-card.selected { border-color: var(--blue); background: rgba(87,148,242,.06); }
 .ft-card.selected::before { background: var(--blue); }
 .ft-icon  { font-size: 28px; margin-bottom: 8px; }
-.ft-title { font-size: 14px; font-weight: 700; color: #fff; margin-bottom: 6px; }
+.ft-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
 .ft-desc  { font-size: 11px; color: var(--dim); line-height: 1.5; margin-bottom: 8px; }
 .ft-meta  { font-size: 11px; font-family: 'JetBrains Mono', monospace; }
 .ft-meta .ft-tag {
@@ -349,7 +349,7 @@ footer {
 /* Health grid */
 .health-item {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 7px 0; border-bottom: 1px solid rgba(42,47,78,.5); font-size: 12px;
+  padding: 7px 0; border-bottom: 1px solid rgba(203,213,225,.8); font-size: 12px;
 }
 .health-item:last-child { border-bottom: none; }
 .health-dot {
@@ -1018,21 +1018,21 @@ const chart = new Chart(document.getElementById('chart').getContext('2d'), {
     interaction: { mode: 'index', intersect: false },
     scales: {
       x: {
-        grid: { color: 'rgba(42,47,78,.8)' },
-        ticks: { color: '#8e8e8e', font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 8 }
+        grid: { color: 'rgba(203,213,225,.8)' },
+        ticks: { color: '#64748b', font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 8 }
       },
       y: {
-        grid: { color: 'rgba(42,47,78,.8)' },
-        ticks: { color: '#8e8e8e', font: { family: 'JetBrains Mono', size: 10 } },
+        grid: { color: 'rgba(203,213,225,.8)' },
+        ticks: { color: '#64748b', font: { family: 'JetBrains Mono', size: 10 } },
         min: 0,
-        title: { display: true, text: 'records / s', color: '#8e8e8e', font: { size: 11 } }
+        title: { display: true, text: 'records / s', color: '#64748b', font: { size: 11 } }
       }
     },
     plugins: {
       legend: { display: false },
       tooltip: {
-        backgroundColor: '#1c2033', borderColor: '#2a2f4e', borderWidth: 1,
-        titleColor: '#d8d9da', bodyColor: '#8e8e8e',
+        backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: 1,
+        titleColor: '#1e293b', bodyColor: '#64748b',
         callbacks: { label: c => ` ${c.dataset.label}: ${(c.parsed.y||0).toFixed(1)} /s` }
       }
     }

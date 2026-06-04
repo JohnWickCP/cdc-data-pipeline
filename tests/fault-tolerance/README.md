@@ -8,10 +8,10 @@ Hướng dẫn test khả năng chịu lỗi trên môi trường VM.
 
 ```bash
 # Chạy từ root của project
-bash fault-tolerance/run_ft_tests.sh all      # test cả 3 scenarios
-bash fault-tolerance/run_ft_tests.sh kafka    # chỉ Kafka crash
-bash fault-tolerance/run_ft_tests.sh debezium # chỉ Debezium restart
-bash fault-tolerance/run_ft_tests.sh spark    # chỉ Spark kill
+bash tests/fault-tolerance/run_ft_tests.sh all      # test cả 3 scenarios
+bash tests/fault-tolerance/run_ft_tests.sh kafka    # chỉ Kafka crash
+bash tests/fault-tolerance/run_ft_tests.sh debezium # chỉ Debezium restart
+bash tests/fault-tolerance/run_ft_tests.sh spark    # chỉ Spark kill
 ```
 
 Hoặc dùng dashboard: http://localhost:8888 → tab **Fault Tolerance**
@@ -36,14 +36,14 @@ Hoặc dùng dashboard: http://localhost:8888 → tab **Fault Tolerance**
 
 ```bash
 # Thay thế single-broker bằng 3-broker cluster
-docker compose -f docker-compose.yml -f fault-tolerance/docker-compose.kafka-cluster.yml up -d
+docker compose -f docker-compose.yml -f tests/fault-tolerance/docker-compose.kafka-cluster.yml up -d
 
 # Verify 3 brokers running
 docker ps | grep kafka
 # Expected: cdc-kafka, cdc-kafka-2, cdc-kafka-3
 
 # Test ISR failover
-bash fault-tolerance/run_ft_tests.sh cluster
+bash tests/fault-tolerance/run_ft_tests.sh cluster
 ```
 
 ### Kết quả mong đợi (3-broker cluster)
@@ -65,7 +65,7 @@ So sánh với single-broker:
 ## Đọc kết quả
 
 ```bash
-cat fault-tolerance/ft_results.jsonl | python3 -c "
+cat tests/fault-tolerance/ft_results.jsonl | python3 -c "
 import json, sys
 for line in sys.stdin:
     r = json.loads(line)

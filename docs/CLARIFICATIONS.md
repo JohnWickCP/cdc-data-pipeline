@@ -345,7 +345,7 @@ Hiện tại benchmark chạy tối đa vài phút. Production cần:
 #### 5. So sánh Kafka partition scaling
 Benchmark mode `partition` đã có — chạy với 1, 2, 4, 8 partitions:
 ```bash
-bash run_bench.sh partition
+bash scripts/run_bench.sh partition
 python benchmark/compare_runs.py --mode partition
 ```
 Expected: throughput tăng ~linear đến khi bottleneck chuyển sang MongoDB write.

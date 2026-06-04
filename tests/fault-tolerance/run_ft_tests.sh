@@ -1,7 +1,7 @@
 #!/bin/bash
-# fault-tolerance/run_ft_tests.sh
+# tests/fault-tolerance/run_ft_tests.sh
 # Automated fault tolerance test suite — chạy trước khi demo hoặc để validate
-# Usage: bash fault-tolerance/run_ft_tests.sh [single|all]
+# Usage: bash tests/fault-tolerance/run_ft_tests.sh [single|all]
 # Output: PASS/FAIL per scenario + recovery time
 
 set -euo pipefail
@@ -15,7 +15,7 @@ ok()    { echo -e "${GREEN}[PASS]${NC} $*"; }
 fail()  { echo -e "${RED}[FAIL]${NC} $*"; }
 title() { echo -e "\n${BOLD}$*${NC}"; }
 
-RESULTS_FILE="${RESULTS_FILE:-fault-tolerance/ft_results.jsonl}"
+RESULTS_FILE="${RESULTS_FILE:-tests/fault-tolerance/ft_results.jsonl}"
 
 # ── Helpers ─────────────────────────────────────────────────────────
 mysql_count() {
@@ -210,7 +210,7 @@ test_kafka_cluster_failover() {
     # Check if running cluster mode
     if ! docker ps --format '{{.Names}}' | grep -q cdc-kafka-2; then
         warn "cdc-kafka-2 not running — this scenario requires 3-broker cluster"
-        warn "Run with: docker compose -f docker-compose.yml -f fault-tolerance/docker-compose.kafka-cluster.yml up -d"
+        warn "Run with: docker compose -f docker-compose.yml -f tests/fault-tolerance/docker-compose.kafka-cluster.yml up -d"
         return
     fi
 

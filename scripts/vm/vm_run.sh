@@ -57,7 +57,7 @@ trap cleanup SIGINT SIGTERM
 
 # ── 1. Load profile env vars (để recorder detect đúng profile) ───────────
 log "Profile: $PROFILE"
-ENV_FILE=".env.${PROFILE}"
+ENV_FILE="config/.env.${PROFILE}"
 if [ -f "$ENV_FILE" ]; then
     # Export tất cả biến từ profile file
     set -a
@@ -75,7 +75,7 @@ bash start.sh "--profile=$PROFILE"
 
 # ── 3. Smoke test ─────────────────────────────────────────────────────────
 log "Kiểm tra pipeline (smoke test)..."
-if bash test_smoke.sh --quick; then
+if bash scripts/test_smoke.sh --quick; then
     ok "Pipeline healthy"
 else
     warn "Smoke test có lỗi — tiếp tục anyway (xem log trên)"
@@ -133,7 +133,7 @@ fi
 # ── 8. Benchmark (nếu yêu cầu) ────────────────────────────────────────────
 if [ -n "$BENCH_MODE" ]; then
     log "Chạy benchmark mode: $BENCH_MODE..."
-    bash run_bench.sh "$BENCH_MODE"
+    bash scripts/run_bench.sh "$BENCH_MODE"
     ok "Benchmark xong — xem kết quả tại Grafana"
 fi
 

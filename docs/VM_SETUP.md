@@ -102,7 +102,7 @@ bash start.sh
 
 Verify mọi thứ OK:
 ```bash
-bash test_smoke.sh
+bash scripts/test_smoke.sh
 # Kết quả mong đợi: 43/43 PASS
 ```
 
@@ -182,8 +182,8 @@ docker exec cdc-kafka kafka-topics \
 ### 1. Chạy quick benchmark
 
 ```bash
-bash run_bench.sh           # Quick mode (~3 phút)
-bash run_bench.sh full      # Full mode (~10 phút)
+bash scripts/run_bench.sh           # Quick mode (~3 phút)
+bash scripts/run_bench.sh full      # Full mode (~10 phút)
 ```
 
 Kết quả append vào `benchmark/results/history.jsonl`.

@@ -24,9 +24,9 @@ env/
 # Active .env (generated at runtime from profile files — không commit)
 .env
 monitoring/exporter/.env
-!.env.laptop
-!.env.server
-!.env.vm
+!config/.env.laptop
+!config/.env.server
+!config/.env.vm
 !monitoring/exporter/.env.example
 jobs/scala/target/
 jobs/scala/project/target/

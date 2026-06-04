@@ -87,12 +87,12 @@ Câu hỏi trả lời được: *"Thêm cores cải thiện throughput bao nhi�
 
 ```bash
 # Test với 1 partition
-# Sửa .env.laptop: KAFKA_NUM_PARTITIONS=1
+# Sửa config/.env.laptop: KAFKA_NUM_PARTITIONS=1
 bash stop.sh -v && bash start.sh
 # → chạy test, ghi lại kết quả
 
 # Test với 3 partitions
-# Sửa .env.laptop: KAFKA_NUM_PARTITIONS=3
+# Sửa config/.env.laptop: KAFKA_NUM_PARTITIONS=3
 bash stop.sh -v && bash start.sh
 # → chạy test lại, so sánh
 ```

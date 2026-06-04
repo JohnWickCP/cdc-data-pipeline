@@ -142,7 +142,7 @@ Headroom: 275 ÷ 17 ≈ 16× → VietShop tăng trưởng 16× mà không cần 
 
 ## Phần 1 — Bài toán từ thực tế, thông số VietShop
 
-### Thông số thực tế của pipeline này (đo bằng `bash run_bench.sh`, Scala mode)
+### Thông số thực tế của pipeline này (đo bằng `bash scripts/run_bench.sh`, Scala mode)
 
 | Metric đo được | Giá trị | Ghi chú |
 |---|---|---|
@@ -338,7 +338,7 @@ Inject: ~500 customers + ~300 orders tự động
 | Spark batch duration | 650–2500ms | Spark đang chạy micro-batch |
 | E2E lag | Tăng lúc inject, về 0 sau ~10s | Pipeline drain hết backlog |
 
-**Kết quả benchmark thật** (đo bằng `bash run_bench.sh`, Scala mode, i5-11400H):
+**Kết quả benchmark thật** (đo bằng `bash scripts/run_bench.sh`, Scala mode, i5-11400H):
 ```
 E2E peak:        404 rec/s
 E2E sustained:   275 rec/s    ← 16× VietShop flash sale peak (17 events/s)
@@ -385,16 +385,62 @@ Nhấn: [▶ RUN SCENARIO]
 **Output hiển thị trong Recovery Timeline:**
 ```
 [SCENARIO] Spark Job Crash & Checkpoint Recovery
-[BASELINE] MySQL=523 | MongoDB=523
-[INJECT]   Killing Spark streaming job...
-[STATUS]   Spark DOWN — messages accumulating in Kafka
-[DATA]     1 record inserted → event in Kafka → waiting for restart
-[RECOVER]  Re-submitting Spark job with checkpoint...
-[STATUS]   Reading from checkpoint offset, no reprocessing
-[RESULT]   Recovery: 28s | MySQL=524 | MongoDB=524 | PASS — 0 data loss
+[BASELINE] MySQL=27327 | MongoDB=865169
+[INJECT]   Killing Spark streaming job (pkill -f CdcRedisConsumer)...
+[STATUS]   Spark DOWN — messages accumulating in Kafka (0 data loss risk)
+[INFO]     Checkpoint at /tmp/spark-checkpoint/cdc-pipeline preserved
+[DATA]     3 records inserted → events in Kafka → waiting for Spark restart
+[RECOVER]  Re-submitting Spark job with existing checkpoint...
+[STATUS]   Spark job registered (app-0001) — reading from checkpoint offset 2733371
+[STATUS]   Batch 1: processing offsets 2733372→2733382 (includes 3 inserted records)
+[RESULT]   Recovery: ~30-40s (packages cached) | Lost: 0 records | PASS
 ```
 
+**Số liệu đo thực (2026-05-28):**
+
+| Metric | Giá trị | Ghi chú |
+|---|---|---|
+| Time Spark DOWN to re-submit | ~0s | manual re-submit ngay |
+| Time re-submit to job registered | ~10s | Spark master scheduling |
+| Time registered to first batch processed | ~20-30s | packages cached |
+| **Total recovery time (warm)** | **~30-40s** | packages đã có trong image |
+| Total recovery time (cold, no cache) | ~8-10 min | download spark-kafka, mongo-spark, jedis |
+| Records inserted during downtime | 3 | via Kafka buffer |
+| Records recovered after restart | 3/3 | via checkpoint resume |
+| **Data loss** | **0** | exactly-once via checkpoint |
+
+**Cơ chế hoạt động:**
+- Kafka buffer giữ messages khi Spark down
+- Spark checkpoint lưu Kafka offset cuối đã xử lý (`customers:2733371`)
+- Re-submit → Spark đọc checkpoint → resume từ offset 2733372 (không re-process cũ, không bỏ sót mới)
+- MongoDB upsert (replaceOne) idempotent → an toàn với at-least-once retry
+
 **Điểm nhấn:** Kafka giữ messages khi Spark down. Spark checkpoint lưu offset đã xử lý. Restart → resume từ đúng offset → exactly-once, không mất, không duplicate.
+
+---
+
+### Scene 4b — "Fault Tolerance: Kill 1 Spark Worker" (1 phút)
+
+**Bối cảnh:** Hội đồng hỏi: "Nếu 1 trong 3 worker nodes chết thì sao?"
+
+**Lệnh thực tế:**
+```bash
+docker stop cdc-spark-worker-1   # kill worker 1/3
+# Insert 10 records trong lúc worker-1 DOWN
+docker start cdc-spark-worker-1  # restore
+```
+
+**Số liệu đo thực (2026-05-28):**
+
+| Metric | Giá trị |
+|---|---|
+| Workers còn lại khi kill | 2/3 |
+| Spark app status | RUNNING (không interrupt) |
+| Pipeline downtime | 0s |
+| 10 records inserted during kill | 10/10 recovered |
+| **Data loss** | **0** |
+
+**Điểm nhấn:** Spark Standalone tự reschedule tasks lên 2 workers còn lại. Pipeline không bị gián đoạn. Worker chết trong lúc xử lý batch → task được retry lên worker khác → MongoDB upsert idempotent nên không duplicate.
 
 ---
 
@@ -423,7 +469,28 @@ Nhấn: [▶ RUN SCENARIO]
 | Kafka rate | **290–450 events/s** | `kafka_rate` |
 | E2E latency (avg) | **~2.5s** | = trigger interval / 2 |
 | E2E latency (worst) | **~5s** | = 1 full trigger cycle |
-| Fault recovery time | **~15–30s** | đo thực tế từ demo |
+| Kafka crash recovery | **55s** | đo thực 2026-05-28 |
+| Debezium restart recovery | **73s** | đo thực 2026-05-28 |
+| Spark driver crash recovery | **~30-40s** | packages cached; ~8-10 min cold |
+| Kill 1 worker recovery | **0s** | transparent, no interruption |
+
+### Fault Tolerance — Kết quả đo thực (2026-05-28, i5-11400H, Docker Standalone)
+
+| Scenario | MTTR | Data Loss | Cơ chế |
+|---|---|---|---|
+| **Kafka Broker Crash** | **55s** | **0** | Debezium giữ binlog offset → replay khi Kafka up |
+| **Debezium Connector Restart** | **73s** | **0** | Debezium binlog offset stored → resume từ điểm dừng |
+| **Spark Driver Crash** | **~30-40s** *(warm)* | **0** | Checkpoint lưu Kafka offset → resume exact offset |
+| Spark Driver Crash | ~8-10 min *(cold, no pkg cache)* | 0 | Phải download packages lần đầu sau container recreate |
+| **Kill 1 Worker (1/3)** | **0s** | **0** | Spark reschedule tasks → 2 workers còn lại xử lý tiếp |
+| Checkpoint loss (`stop.sh -v`) | ~start.sh time (~3-5 min) | 0* | Spark đọc lại từ Kafka offset mới nhất |
+
+> *Checkpoint loss: khi Spark start fresh không có checkpoint, nó đọc từ Kafka offset hiện tại (không replay lịch sử). Records đã vào MySQL trước khi Spark start sẽ không được sync vào MongoDB trong lần start đó — đây là **known issue**, không phải data loss trong điều kiện bình thường (pipeline running liên tục).
+
+**Phương pháp đo:**
+- Mỗi scenario: snapshot MySQL count trước, inject 3-10 records, measure time đến MongoDB count tăng tương ứng
+- `MTTR` = thời gian từ khi restart component đến MongoDB bắt kịp MySQL
+- Verified: tất cả records FT-Kafka-\*, FT-Deb-\*, FT-Spark-\*, FT-W1Kill-\* đều xuất hiện trong MongoDB sau recovery
 
 ### Pipeline capacity vs nhu cầu VietShop
 

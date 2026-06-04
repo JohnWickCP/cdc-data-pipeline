@@ -1,5 +1,5 @@
 # Kafka 3-broker cluster override — dùng cho VM với cấu hình lớn hơn
-# Usage: docker compose -f ../docker-compose.yml -f docker-compose.kafka-cluster.yml up -d
+# Usage: docker compose -f docker-compose.yml -f tests/fault-tolerance/docker-compose.kafka-cluster.yml up -d
 #
 # Yêu cầu VM: >= 8 core, >= 16GB RAM
 # Mục đích: demo replication.factor=3, ISR failover, kill 1 broker không mất data

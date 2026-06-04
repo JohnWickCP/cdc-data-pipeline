@@ -192,7 +192,7 @@ if [ -z "$HW_PROFILE" ]; then
     echo "🔍 Auto-detect profile: ${HW_PROFILE}  (override bằng --profile=X)"
 fi
 
-PROFILE_FILE="$COMPOSE_DIR/.env.$HW_PROFILE"
+PROFILE_FILE="$COMPOSE_DIR/config/.env.$HW_PROFILE"
 if [ ! -f "$PROFILE_FILE" ]; then
     echo "Lỗi: Không tìm thấy profile '$PROFILE_FILE'"
     echo "Profile có sẵn: laptop, server, vm"

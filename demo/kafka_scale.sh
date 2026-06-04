@@ -222,7 +222,7 @@ cmd_bench() {
     echo ""
 
     log "Phase 1: 1 broker"
-    bash run_bench.sh quick 2>&1 | tail -5
+    bash scripts/run_bench.sh quick 2>&1 | tail -5
 
     log "Adding brokers 2 + 3..."
     cmd_add
@@ -230,7 +230,7 @@ cmd_bench() {
     sleep 30
 
     log "Phase 2: 3 brokers"
-    bash run_bench.sh quick 2>&1 | tail -5
+    bash scripts/run_bench.sh quick 2>&1 | tail -5
 
     log "Benchmark complete. Compare: python benchmark/compare_runs.py -n 6"
 }

@@ -30,7 +30,7 @@ git clone <your-repo-url> cdc-data-pipeline
 cd cdc-data-pipeline
 
 # Setup tất cả tự động (Docker + Python deps + env)
-bash vm_setup.sh
+bash scripts/vm/vm_setup.sh
 ```
 
 > `vm_setup.sh` tự cài Docker nếu chưa có, cài Python packages,
@@ -49,7 +49,7 @@ bash start.sh --profile=vm
 
 # Chờ 5-8 phút lần đầu (Spark download packages)
 # Smoke test
-bash test_smoke.sh          # mong đợi: 43/43 PASS
+bash scripts/test_smoke.sh  # mong đợi: 43/43 PASS
 ```
 
 ---
@@ -70,8 +70,8 @@ python3 demo/record_demo.py
 
 **Terminal 3 — Benchmark (tùy chọn):**
 ```bash
-bash run_bench.sh           # quick ~3 phút
-bash run_bench.sh full      # full ~10 phút
+bash scripts/run_bench.sh           # quick ~3 phút
+bash scripts/run_bench.sh full      # full ~10 phút
 ```
 
 ---

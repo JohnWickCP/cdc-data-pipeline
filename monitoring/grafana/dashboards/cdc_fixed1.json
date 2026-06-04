@@ -1,6 +1,7 @@
 {
   "uid": "cdc-pipeline-main",
   "title": "CDC Pipeline — Demo Dashboard",
+  "style": "light",
   "refresh": "5s",
   "time": {
     "from": "now-30m",
