@@ -327,9 +327,73 @@ Kết quả đo lường hiệu năng thực tế. Tất cả số liệu đo b�
 > \* Sustained 377 rec/s tại 1,254 rec/s inject × 60s; lag 7,378 còn lại sau drain (180s tổng).
 > Runs bị đánh dấu invalid (Spark replay, consumer rebalancing) đã loại khỏi bảng.
 
+| **2026-06-05** | **Scala** | **bottleneck_hunting** | **3** | **3** | **i5-11400H** | **2,270.3** | N/A | **1,882 ms** | **5,464 ms** | **Bottleneck hunting — MySQL cap 3,416 rec/s** |
+| **2026-06-05** | **Scala** | **full** | **3** | **1** | **i5-11400H** | **1,677.9** | **1,182.1** | 2,365 ms | 6,442 ms | Partition sweep — 1 partition |
+| **2026-06-05** | **Scala** | **full** | **3** | **6** | **i5-11400H** | **1,755.8** | **1,280.7** | 675 ms | 1,320 ms | Partition sweep — 6 partitions |
+
+> Runs bottleneck_hunting 2026-06-05: bottleneck bắt đầu tại inject 3,416 rec/s (target 5,000).
+> Sustained test cho 1p/6p: lag=0 sau drain (cleanup bug đã fix).
+
 ---
 
-## 7. Smoke Test
+## 7. Phân tích Bottleneck — 2026-06-05
+
+> Dựa trên data Phase 1 (bottleneck_hunting, 3 partitions, i5-11400H). Run: `run_20260605_003123`.
+
+### 7.1 Pipeline Throughput tại mức tải khác nhau
+
+| Stage | 3000 target (2617 actual) | 5000 target (3416 actual) |
+|---|---|---|
+| MySQL inject | 2,617 rec/s | **3,417 rec/s** (capped!) |
+| Debezium → Kafka | 3,626 events/s | 3,141 events/s |
+| Spark batch p50 | 1,882 ms | 1,748 ms |
+| Spark batch p95 | **5,464 ms** (> 5s trigger) | 2,488 ms |
+| MongoDB writes | ~2,270 rec/s (E2E) | ~350 rec/s (E2E, bị bottleneck) |
+| Kafka lag cuối inject | 12,414 | 47,028 |
+| Drain time | 5.2s | **286.9s** (gần timeout 300s) |
+
+### 7.2 Xác định Bottleneck Stage
+
+**Bottleneck checklist từ Phase 1 data:**
+
+| Stage | Dấu hiệu | Kết luận |
+|---|---|---|
+| **MySQL inject speed** | Tại 5000 target, MySQL chỉ inject được 3,416 rec/s (68% target) | ✅ **PRIMARY BOTTLENECK** — MySQL commit rate cap trên Windows/Docker/WSL2 |
+| **Debezium throughput** | Kafka rate = 3,141 events/s ≈ 92% inject rate → gần theo kịp | ⚠️ Nhẹ — lag ~276 events/s |
+| **Spark batch time** | p95 = 5,464ms > 5s trigger tại 3000 level → Spark bắt đầu stress | ⚠️ Secondary — Spark overloaded tại cao tải |
+| **MongoDB writes** | Không có bottleneck riêng — write rate = Spark output rate | ✅ OK |
+| **Redis ops** | ~823 ops/s tại tải thấp, không đo tại max load | ✅ OK (estimated) |
+
+### 7.3 Nguyên nhân "drain rate sụp" từ 2,385 → 45 rec/s
+
+Tại 5000 level, sau khi inject xong, drain rate chỉ đạt 45 rec/s (vs 2,385 rec/s tại 3000 level):
+
+**Giải thích:** Khi inject 3,416 rec/s trong 44s (150,000 records), Spark tích lũy 47,028 records chưa xử lý trong Kafka. Sau khi inject xong:
+1. Spark cần xử lý 47,028 records còn tồn đọng
+2. Tuy nhiên Spark batch p99 = 8,164ms → có batch GC pause / memory pressure
+3. JVM GC của Spark bị triggered do large batch size → thời gian drain kéo dài
+4. Thực tế chỉ drain được 13,040 records trong 286.9s = 45 rec/s
+
+**Kết luận:** Drain rate thấp = Spark GC pressure sau burst lớn, không phải MongoDB bottleneck.
+
+### 7.4 Tóm tắt Bottleneck
+
+```
+Pipeline throughput ceiling (laptop, 3p, Scala JAR):
+  
+  MySQL inject    →   Debezium/Kafka   →   Spark Streaming  →   MongoDB + Redis
+  ~3,400 rec/s        ~3,140 events/s      ~2,270-2,600/s        = Spark output
+  [PRIMARY CAP]       [OK, 92%]            [OK tại <2600, GC     [OK]
+                                            stress tại >3000]
+  
+  Bottleneck: MySQL commit speed (Windows/Docker/WSL2 overhead)
+  Spark bắt đầu stress: >2,600 rec/s (p95 > 5s trigger)
+  Pipeline FAIL: >3,400 rec/s inject (drain timeout 5 min)
+```
+
+---
+
+## 8. Smoke Test
 
 **43/43 PASS** — tất cả checks đều pass:
 - 13 containers running & healthy

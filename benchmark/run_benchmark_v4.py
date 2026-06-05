@@ -751,6 +751,13 @@ MODES = {
         'sustained_duration': 60,
         'description': 'mix INSERT(60%)/UPDATE(30%)/DELETE(10%) — phản ánh traffic production thực tế',
     },
+    'sustained10m': {
+        'levels': [2000],
+        'duration': 30,
+        'sustained_duration': 600,
+        'max_drain_s': 300,
+        'description': 'Phase 4 — 1 level 2000 rec/s + sustained 10 phút (600s)',
+    },
 }
 
 
