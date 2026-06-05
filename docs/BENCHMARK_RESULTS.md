@@ -236,6 +236,58 @@ Kết quả đo lường hiệu năng thực tế. Tất cả số liệu đo b�
 | **Spark p95 vượt 5s** | Tại 3,000 rec/s target (5,464 ms) |
 | **E2E Latency P50** | 4,883 ms ≈ ~5s (1 Spark trigger cycle) |
 
+### 4.7 Laptop — Partition Sweep (1p / 3p / 6p, full mode, i5-11400H)
+
+> **Ngày:** 2026-06-05 — so sánh 3 partition counts cùng cấu hình.
+> 3p data từ run `run_20260605_003123` (bottleneck_hunting mode, cùng inject levels 500/1000/2000).
+> 1p/6p từ full mode. Engine Scala JAR, 3 workers × 4 cores = 12 cores.
+
+#### Ramp-up comparison (full mode levels)
+
+| Target inject | **1p E2E** | **3p E2E** | **6p E2E** | 1p p50 | 6p p50 |
+|---|---|---|---|---|---|
+| 100 rec/s | 93.6 | 93.6 | 93.6 | 553ms | 820ms |
+| 200 rec/s | 175.9 | — | 187.0 | 438ms | 692ms |
+| 500 rec/s | 425.8 | 414.1 | 437.9 | 754ms | 851ms |
+| 1,000 rec/s | 896.3 | 839.4 | 844.1 | 1,338ms | 658ms |
+| 2,000 rec/s | **1,677.9** | **1,636.9** | **1,755.8** | 2,365ms | **735ms** |
+
+#### Sustained test (60 giây, 80% max E2E)
+
+| Partition | Target | E2E rec/s | Lag cuối | Total time | Spark p50 | Spark p95 |
+|---|---|---|---|---|---|---|
+| 1p | 1,342 rec/s | **1,182.1** | 0 | 68.1s | 1,672ms | 12,667ms |
+| 3p* | 1,254 rec/s | 377.0* | 7,378* | 180.0s | 816ms | 1,296ms |
+| 6p | 1,404 rec/s | **1,280.7** | 0 | 65.8s | 675ms | 1,320ms |
+
+> \* 3p sustained bị ảnh hưởng bởi cleanup bug (before_mongo sai). 1p/6p đã fix bug → lag=0.
+
+#### E2E Latency (tất cả partition counts)
+
+| Partitions | P50 | P95 | P99 |
+|---|---|---|---|
+| 1p | 4,890 ms | 5,660 ms | 5,660 ms |
+| 3p | 4,883 ms | 4,936 ms | 4,936 ms |
+| 6p | 4,925 ms | 4,928 ms | 4,928 ms |
+
+> Latency tương đồng — xác nhận bottleneck không phải Spark batch time mà là pipeline throughput.
+
+#### Phân tích và kết luận
+
+| Metric | Kết luận |
+|---|---|
+| **Max E2E (2000 target)** | 6p (1,756) > 1p (1,678) > 3p (1,637) — chênh lệch **4–7%** |
+| **Spark p50 batch** | 6p (735ms) << 3p (1,568ms) << 1p (2,365ms) — 6p **3.2× faster batch** |
+| **Sustained (lag=0)** | 6p (1,281) > 1p (1,182) — 6p ~8% tốt hơn |
+| **E2E Latency** | ~4,900 ms tất cả — không đổi theo partition count |
+
+**Kết luận về ảnh hưởng partition count (single-broker laptop):**
+- Thêm partition giúp **Spark batch nhỏ hơn** (parallel read từ nhiều partition) → p50 batch giảm 3×
+- Nhưng E2E throughput **chỉ tăng 4–7%** (không tuyến tính) vì bottleneck là **Debezium → MySQL**
+- Debezium có 1 thread per connector → không benefit từ nhiều Kafka partition
+- Kết luận từ section 4.2 (quick mode) được xác nhận ở full mode: **bottleneck = Debezium/MySQL, không phải Spark consumer**
+- Diminishing return bắt đầu ngay từ 1p → 3p (thêm partition không tăng throughput đáng kể)
+
 ---
 
 ## 5. So sánh Scala vs Python
