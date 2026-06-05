@@ -374,6 +374,11 @@ def run_e2e_realistic_test(target_tps, duration_s=30, max_drain_s=120):
     total_events, inject_elapsed, breakdown = inject_realistic_load(target_tps, duration_s)
     inject_rate = total_events / inject_elapsed if inject_elapsed > 0 else 0
 
+    # Snapshot lag + Kafka offset right at inject end
+    lag_sample_at_inject = sample_metrics()
+    lag_at_inject_end = int(lag_sample_at_inject.get('lag', 0))
+    kafka_at_inject_end = get_kafka_offset()
+
     # Chờ Kafka offset ổn định (không tăng nữa = drain xong)
     drain_start = time.time()
     prev_offset = get_kafka_offset()
@@ -397,8 +402,13 @@ def run_e2e_realistic_test(target_tps, duration_s=30, max_drain_s=120):
     kafka_delta = after_kafka - before_kafka
     e2e_rate = kafka_delta / total_elapsed if total_elapsed > 0 else 0
 
+    kafka_drained_during_drain = after_kafka - kafka_at_inject_end
+    drain_rate_rps = round(kafka_drained_during_drain / drain_elapsed, 1) if drain_elapsed > 0 else 0
+
     spark_values = sorted([s['spark_ms'] for s in samples if s['spark_ms'] > 0])
     kafka_rates = [s['kafka_rate'] for s in samples if s['kafka_rate'] > 0]
+    lag_values = [s['lag'] for s in samples if s.get('lag', 0) > 0]
+    peak_lag = round(max(lag_values, default=0))
 
     return {
         "target_tps":         target_tps,
@@ -410,8 +420,12 @@ def run_e2e_realistic_test(target_tps, duration_s=30, max_drain_s=120):
         "drain_elapsed_s":    round(drain_elapsed, 1),
         "total_elapsed_s":    round(total_elapsed, 1),
         "inject_rate":        round(inject_rate, 1),
+        "inject_tps":         round(inject_rate, 1),
         "e2e_tps":            round(e2e_rate, 1),
+        "lag_at_inject_end":  lag_at_inject_end,
+        "peak_lag":           peak_lag,
         "lag_remaining":      0,
+        "drain_rate_rps":     drain_rate_rps,
         "synced":             settled,
         "spark_batch_avg_ms": round(statistics.mean(spark_values), 1) if spark_values else 0,
         "spark_batch_p50_ms": round(spark_values[int(len(spark_values) * 0.50)], 1) if spark_values else 0,

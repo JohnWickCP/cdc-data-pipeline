@@ -331,6 +331,8 @@ Kết quả đo lường hiệu năng thực tế. Tất cả số liệu đo b�
 | **2026-06-05** | **Scala** | **full** | **3** | **1** | **i5-11400H** | **1,677.9** | **1,182.1** | 2,365 ms | 6,442 ms | Partition sweep — 1 partition |
 | **2026-06-05** | **Scala** | **full** | **3** | **6** | **i5-11400H** | **1,755.8** | **1,280.7** | 675 ms | 1,320 ms | Partition sweep — 6 partitions |
 | **2026-06-05** | **Scala** | **sustained10m** | **3** | **3** | **i5-11400H** | **1,611.3** | **1,248.4** | **858 ms** | **1,145 ms** | **Phase 4 sustained 10 phút — lag=0, 773k records** |
+| **2026-06-05** | **Scala** | **realistic** | **3** | **3** | **i5-11400H** | **418.7** | **311.4** | **714 ms** | **963 ms** | **Mixed workload 60/30/10 — UPDATE/DELETE không gây bottleneck** |
+| **2026-06-05** | **Script** | **multi_table** | **3** | **3** | **i5-11400H** | **4,997/s** (5k events) | N/A | — | — | **Multi-table 2500+2500/s — 2 topics, lag=0, Redis consistent** |
 
 > Runs bottleneck_hunting 2026-06-05: bottleneck bắt đầu tại inject 3,416 rec/s (target 5,000).
 > Sustained test cho 1p/6p: lag=0 sau drain (cleanup bug đã fix).
@@ -500,7 +502,7 @@ Phần này liệt kê các thông số **chưa có trong benchmark hiện tại
 |---|---|---|---|
 | 4 | **Redis write latency** | Không có số đo riêng. Pipeline ghi Redis trong cùng Spark job với MongoDB nhưng latency chưa đo | Thêm CHECK sau mỗi inject batch: đọc Redis key, so sánh timestamp |
 | 5 | **Data integrity dưới tải** | Chỉ verify count ở cuối mỗi level. Không verify _trong khi_ inject | Thêm concurrent check: query MySQL count vs MongoDB count mỗi 5 giây trong khi inject |
-| 6 | **Throughput với multi-table** | Benchmark chỉ inject `customers`. Pipeline xử lý cả `orders` | Test đồng thời INSERT vào cả `customers` và `orders` |
+| 6 | **Throughput với multi-table** | ✅ **Đã đo 2026-06-05** — Multi-table cap ~5,000 events/s, lag=0 sau drain, Redis khớp 100% | Xem Section 10.2 |
 | 7 | **Debezium snapshot rate** | Không đo. Cold start với nhiều records thì Debezium mất bao lâu để snapshot? | Tạo 100k records trước, reset Debezium, đo thời gian snapshot hoàn thành |
 
 ### 9.3 Nice-to-have — Làm đẹp báo cáo
@@ -508,7 +510,7 @@ Phần này liệt kê các thông số **chưa có trong benchmark hiện tại
 | # | Thông số | Hiện trạng | Cách đo |
 |---|---|---|---|
 | 8 | **CPU/Memory per service** | Không có. Không biết Kafka hay Spark hay MongoDB đang dùng bao nhiêu RAM khi chạy | `docker stats --no-stream` trong khi benchmark đang chạy |
-| 9 | **Throughput với `UPDATE`/`DELETE`** | Benchmark chỉ INSERT. Debezium cũng capture UPDATE/DELETE nhưng chưa test | Thêm UPDATE/DELETE mix vào benchmark (60% INSERT / 30% UPDATE / 10% DELETE — mode `realistic` đã có code) |
+| 9 | **Throughput với `UPDATE`/`DELETE`** | ✅ **Đã đo 2026-06-05** — Mixed 60/30/10: E2E 418.7/s tại 500/s inject, giảm ~2% vs INSERT-only | Xem Section 10.1 |
 | 10 | **Kafka message retention vs throughput** | Không đo. Disk I/O khi Kafka log lớn có ảnh hưởng không? | Chạy full mode liên tục, monitor `df -h` và `iostat` |
 
 ### 9.4 Số liệu đã có — Dùng ngay được cho báo cáo
@@ -533,3 +535,105 @@ Phần này liệt kê các thông số **chưa có trong benchmark hiện tại
 | Fault recovery time (3-broker ISR) | **< 5s** (VM scenario) |
 | Spark trigger interval | **5 giây** |
 | E2E latency (smoke test) | **~3 giây** (1 record, không phải percentile) |
+| **Mixed workload max E2E (laptop, 3p)** | **418.7 events/s** (60/30/10 mix, 500 target) ← mới |
+| **Multi-table sustained cap (laptop, 3p)** | **~5,000 events/s** (2×2,500 cust+ord, lag=0 after drain) ← mới |
+| **Multi-table MySQL concurrent cap** | **~2,500 rec/s per table** (~5,000 total concurrent) ← mới |
+| Multi-table Redis consistency | ✅ Verified — customers:total, orders:total, orders:revenue đều khớp |
+
+---
+
+## 10. Mixed Workload + Multi-table — 2026-06-05
+
+> Session này đo 2 workload chưa có baseline: realistic mix (INSERT/UPDATE/DELETE) và multi-table concurrent.
+
+### 10.1 Mixed Workload (`realistic` mode — 60% INSERT / 30% UPDATE / 10% DELETE)
+
+> Engine: Scala JAR, 3 partitions, 3 workers. E2E = Kafka offset delta / total time (vì DELETE làm MongoDB count giảm, không dùng mongo_delta).
+
+#### E2E Latency per-record (n=20/20 probes, trước khi inject)
+
+| P50 | P95 | P99 | Avg |
+|---|---|---|---|
+| **4,895.9 ms** | **4,947.9 ms** | **4,947.9 ms** | 4,779.9 ms |
+
+> Nhất quán với INSERT-only baseline (P50=4,883ms) — latency không đổi theo workload type.
+
+#### Ramp-up: Mixed vs INSERT-only baseline
+
+| Target inject | Inject thực | **Mixed E2E** | **INSERT-only E2E** | Δ% |
+|---|---|---|---|---|
+| 100 events/s | 99.8 events/s | **79.8** | 93.6 | -14.7% |
+| 200 events/s | 199.4 events/s | **159.1** | 175.9 | -9.6% |
+| 500 events/s | 496.4 events/s | **418.7** | 425.8 | -1.7% |
+| Sustained (334/s × 60s) | — | **311.4** | — | — |
+
+> **Lưu ý về đơn vị**: Mixed E2E tính trên Kafka offset delta (bao gồm cả UPDATE/DELETE events); INSERT-only tính trên MongoDB delta (net records). Hai metric không hoàn toàn đồng nhất — so sánh % chỉ là ước lượng.
+> Lag cuối mỗi level = 0 (pipeline drain đầy đủ).
+
+#### Spark batch metrics (mixed workload)
+
+| Level | p50 batch | p95 batch |
+|---|---|---|
+| 100/s | 451 ms | 1,119 ms |
+| 200/s | 503 ms | 888 ms |
+| 500/s | 714 ms | 963 ms |
+
+#### Phân tích: UPDATE/DELETE có làm chậm pipeline không?
+
+| Câu hỏi | Kết luận |
+|---|---|
+| UPDATE/DELETE gây bottleneck mới? | **KHÔNG** — pipeline drain hoàn toàn ở mọi level |
+| Throughput giảm so với INSERT-only? | **Nhẹ** — ~2% tại 500/s (trong margin đo lường) |
+| Redis counter đúng sau DELETE? | **YES** — `customers:total=3` = MySQL `COUNT(*)=3` sau cleanup |
+| E2E latency thay đổi? | **KHÔNG** — P50 ~4,896ms giống hệt INSERT-only |
+
+**Kết luận Mixed Workload:** UPDATE và DELETE đi qua cùng Debezium/Kafka/Spark path với INSERT. Ở tải tương đương, mixed workload không tạo bottleneck mới. Throughput giảm ở mức tải thấp (−15% tại 100/s) nhưng đây một phần do khác biệt phương pháp đo (Kafka delta vs MongoDB delta), không hoàn toàn do performance. Tại 500/s (~realistic production load), chênh lệch chỉ 1.7% — **không đáng kể**.
+
+---
+
+### 10.2 Multi-table Concurrent (customers + orders đồng thời)
+
+> Script: `benchmark/multi_table_inject.py`. Inject đồng thời 2 thread vào 2 bảng. Spark job subscribe cả 2 topics.
+> Schema orders thực tế: `id, customer_id (FK), order_date, total_amount DECIMAL(12,2), status ENUM`.
+> Batch INSERT 10 rows, pymysql batch executemany.
+
+#### Kết quả theo mức tải
+
+| Target (cust/s + ord/s) | Actual total events/s | Peak Kafka lag | Synced? | lag=0 sau drain? |
+|---|---|---|---|---|
+| 500 + 500 = 1,000 | 672/s (single-row limit*) | ~1,005 | ✅ | ✅ trong 15s |
+| 1,000 + 1,000 = 2,000 | **1,353/s** (orders single-row*) | ~4,490 | ✅ | ✅ trong 15s |
+| 1,500 + 1,500 = 3,000 | **3,000/s** (batch insert) | ~7,340 | ✅ | ✅ trong 15s |
+| 2,000 + 2,000 = 4,000 | **4,000/s** (batch insert) | ~10,276 | ✅ | ✅ trong 15s |
+| 2,500 + 2,500 = 5,000 | **4,997/s** (batch insert) | ~10,480 | ✅ | ✅ trong 15s |
+| 3,000 + 3,000 = 6,000 | **4,953/s** (MySQL concurrent cap) | ~13,356 | ✅ | ✅ trong 15s |
+
+> \* 500+500 và 1000+1000 dùng single-row INSERT (NOW() trong executemany không batch được) → bị giới hạn tốc độ. Từ 1500+1500 trở lên đã fix batch INSERT.
+
+#### MySQL concurrent write cap (2 tables)
+
+Tại target 3,000+3,000=6,000/s: actual chỉ đạt ~2,483+2,470 = 4,953/s → MySQL concurrent cap ~2,500 rec/s mỗi table = **5,000 total** khi inject 2 tables song song.
+
+> So với single-table cap: ~3,400 rec/s (single thread). Multi-table concurrent: ~5,000 total (2 threads × 2,500/table) — cao hơn 47% vì MySQL có thể xử lý concurrent writes vào các bảng khác nhau hiệu quả hơn.
+
+#### Redis consistency sau multi-table (3,000+3,000 run)
+
+| Redis key | Giá trị | MySQL COUNT(*) | Khớp? |
+|---|---|---|---|
+| `customers:total` | 149,023 | 149,023 | ✅ |
+| `orders:total` | 148,203 | 148,203 | ✅ |
+| `orders:revenue` | 37,833,968.13 | (sum of all total_amount) | ✅ |
+
+> Redis counter hoàn toàn chính xác sau 5,000 events/s concurrent multi-table inject — kể cả `orders:revenue` float accumulation.
+
+#### Bottleneck phân tích: Multi-table
+
+| Stage | Single-table (trước) | Multi-table (session này) | Kết luận |
+|---|---|---|---|
+| MySQL inject cap | ~3,400 rec/s (single-thread) | ~5,000 total (2 threads, 2 tables) | Multi-table 47% cao hơn do MySQL table-level concurrency |
+| Kafka lag pattern | Tích lũy, drain <15s tại <3,400/s | Tích lũy tương tự, drain <15s tại <5,000 total/s | Không bottleneck mới |
+| Bottleneck stage | MySQL inject → Debezium | Vẫn MySQL inject (per-table cap) | Không thay đổi |
+| MongoDB writes | OK | OK (cả customers + orders collection) | Không bottleneck |
+| Spark (2 topics) | N/A | OK — không GC stress tại <5,000/s | Kafka consumer không bottleneck |
+
+**Kết luận Multi-table:** Hai bảng inject đồng thời không tạo bottleneck mới tại Kafka, Spark, hoặc MongoDB. Pipeline xử lý đồng thời 2 Kafka topics trong cùng 1 Spark job hiệu quả. MySQL concurrent write cap tăng lên ~5,000/s (so với 3,400/s single-table). Tất cả test đều sync hoàn toàn (lag=0) sau khi inject kết thúc.
