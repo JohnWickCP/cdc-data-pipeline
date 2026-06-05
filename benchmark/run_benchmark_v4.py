@@ -269,16 +269,32 @@ def run_e2e_test(target_tps, duration_s=30, max_drain_s=120):
     after_mysql = cur.fetchone()[0]
     mysql_delta = after_mysql - before_mysql
 
+    # Snapshot MongoDB ngay khi inject xong → đo lag tích lũy trong giai đoạn inject
+    mongo_at_inject_end = mongo["customers"].count_documents({})
+    lag_at_inject_end = max(0, mysql_delta - (mongo_at_inject_end - before_mongo))
+
     # Chờ MongoDB sync XONG: phải tăng thêm đúng mysql_delta từ baseline
     target_mongo = before_mongo + mysql_delta
     drain_start = time.time()
     synced = False
+    drain_timeline = []   # [{t_s, lag}] sampled mỗi 5s để thấy lag giảm thế nào
+    _next_sample_t = drain_start  # sample ngay t=0
+
     while time.time() - t_start < duration_s + max_drain_s:
+        now = time.time()
         mongo_count = mongo["customers"].count_documents({})
+
+        if now >= _next_sample_t:
+            drain_timeline.append({
+                "t_s": round(now - drain_start, 1),
+                "lag": max(0, target_mongo - mongo_count),
+            })
+            _next_sample_t = now + 5.0
+
         if mongo_count >= target_mongo:
             synced = True
             break
-        time.sleep(0.5)
+        time.sleep(1.0)
 
     t_end = time.time()
     total_elapsed = t_end - t_start
@@ -295,10 +311,16 @@ def run_e2e_test(target_tps, duration_s=30, max_drain_s=120):
     # E2E TPS = records thực sự đến MongoDB / TỔNG thời gian
     e2e_tps = mongo_delta / total_elapsed if total_elapsed > 0 else 0
 
+    # Drain rate = records MongoDB nhận được trong giai đoạn drain / thời gian drain
+    drained_during_drain = final_mongo - mongo_at_inject_end
+    drain_rate_rps = round(drained_during_drain / drain_elapsed, 1) if drain_elapsed > 0 else 0
+
     # Stats từ samples
     spark_values = sorted([s['spark_ms'] for s in samples if s['spark_ms'] > 0])
     kafka_rates = [s['kafka_rate'] for s in samples if s['kafka_rate'] > 0]
     mongo_rates = [s['mongo_rate'] for s in samples if s['mongo_rate'] > 0]
+    lag_values = [s['lag'] for s in samples if s.get('lag', 0) > 0]
+    peak_lag = round(max(lag_values, default=0))
 
     result = {
         "target_tps": target_tps,
@@ -307,6 +329,9 @@ def run_e2e_test(target_tps, duration_s=30, max_drain_s=120):
         "mysql_delta": mysql_delta,
         "mongo_delta": mongo_delta,
         "lag_remaining": lag,
+        "lag_at_inject_end": lag_at_inject_end,
+        "peak_lag": peak_lag,
+        "drain_rate_rps": drain_rate_rps,
         "synced": synced,
         "inject_elapsed_s": round(inject_elapsed, 1),
         "drain_elapsed_s": round(drain_elapsed, 1),
@@ -406,8 +431,18 @@ def cleanup():
         with conn.cursor() as cur:
             cur.execute(f"DELETE FROM customers WHERE id >= {START_ID}")
         conn.close()
-        # Chờ CDC xử lý DELETE
+        # Chờ CDC xử lý DELETE — phải đợi MongoDB drain về ~3 (original records)
         time.sleep(5)
+        try:
+            mongo = pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000)["inventory"]
+            deadline = time.time() + 120  # max 2 phút wait
+            while time.time() < deadline:
+                count = mongo["customers"].count_documents({})
+                if count <= 10:  # về gần 3 original records
+                    break
+                time.sleep(3)
+        except Exception:
+            time.sleep(10)  # fallback nếu không kết nối được MongoDB
     except Exception:
         pass
 
@@ -691,10 +726,17 @@ MODES = {
         'description': '~10 phút, chuẩn báo cáo',
     },
     'stress': {
-        'levels': [100, 200, 500, 1000, 2000, 5000],
+        'levels': [100, 500, 1000, 2000, 3000, 5000],
         'duration': 30,
         'sustained_duration': 60,
         'description': 'tăng đến bottleneck',
+    },
+    'bottleneck_hunting': {
+        'levels': [100, 500, 1000, 2000, 3000, 5000],
+        'duration': 30,
+        'sustained_duration': 60,
+        'max_drain_s': 300,
+        'description': 'bottleneck hunting — drain timeout 5min, đầy đủ lag/drain metrics',
     },
     'partition': {
         'levels': [100, 500, 1000, 2000],
@@ -830,13 +872,17 @@ def main():
             print(f"  {C.DIM}E2E records/s:{C.X}    {C.BOLD}{result['e2e_tps']}{C.X}  ← Kafka delta/tổng thời gian")
             print(f"  {C.DIM}Kafka delta:{C.X}       {result['kafka_delta']} events")
         else:
-            result = run_e2e_test(target, cfg['duration'])
+            result = run_e2e_test(target, cfg['duration'],
+                                  max_drain_s=cfg.get('max_drain_s', 120))
             print(f"  {C.DIM}Inject rate:{C.X}      {result['inject_tps']} records/s")
             print(f"  {C.DIM}E2E records/s:{C.X}    {C.BOLD}{result['e2e_tps']}{C.X}  ← con số thật")
             print(f"  {C.DIM}MySQL delta:{C.X}       {result['mysql_delta']}")
             print(f"  {C.DIM}Mongo delta:{C.X}       {result['mongo_delta']}")
 
-        print(f"  {C.DIM}Lag còn lại:{C.X}       {result['lag_remaining']}")
+        print(f"  {C.DIM}Lag cuối inject:{C.X}   {result['lag_at_inject_end']} rec (backlog tích lũy)")
+        print(f"  {C.DIM}Peak lag:{C.X}          {result['peak_lag']} rec")
+        print(f"  {C.DIM}Lag còn lại:{C.X}       {result['lag_remaining']} rec")
+        print(f"  {C.DIM}Drain rate:{C.X}        {result['drain_rate_rps']} rec/s (tốc độ pipeline catch-up)")
         print(f"  {C.DIM}Thời gian inject:{C.X}  {result['inject_elapsed_s']}s")
         print(f"  {C.DIM}Thời gian drain:{C.X}   {result['drain_elapsed_s']}s")
         print(f"  {C.DIM}TỔNG thời gian:{C.X}    {result['total_elapsed_s']}s")
@@ -881,7 +927,8 @@ def main():
     cleanup()
     time.sleep(3)
 
-    sustained_result = run_e2e_test(sustained_target, cfg['sustained_duration'])
+    sustained_result = run_e2e_test(sustained_target, cfg['sustained_duration'],
+                                    max_drain_s=cfg.get('max_drain_s', 120))
 
     print(f"  {C.DIM}E2E records/s:{C.X}    {C.BOLD}{sustained_result['e2e_tps']}{C.X}")
     print(f"  {C.DIM}Records:{C.X}           {sustained_result['mongo_delta']}")
@@ -948,6 +995,8 @@ def main():
         "spark_p95_ms":  sustained_result.get("spark_batch_p95_ms"),
         "spark_p99_ms":  sustained_result.get("spark_batch_p99_ms"),
         "kafka_rate":    sustained_result.get("kafka_rate_avg"),
+        "peak_lag":      sustained_result.get("peak_lag"),
+        "drain_rate":    sustained_result.get("drain_rate_rps"),
         "partitions":    current_partitions,
         "spark_workers": spark_worker_count,
         "bottleneck":    bottleneck["stage"] if bottleneck else None,

@@ -195,6 +195,47 @@ Kết quả đo lường hiệu năng thực tế. Tất cả số liệu đo b�
 | **E2E Latency P50** | **4,914 ms** ← đo lần đầu chính thức |
 | **E2E Latency P95** | **5,430 ms** ← đo lần đầu chính thức |
 
+### 4.6 Laptop — Bottleneck Hunting (3 partitions, bottleneck_hunting mode)
+
+> **Run:** `run_20260605_003123` (2026-06-05) — inject từ 100 → 5000 rec/s, drain timeout 5 phút.
+> Engine: Scala JAR, 3 workers × 4 cores = 12 cores. Kafka 3 partitions.
+
+#### E2E Latency per-record (n=20/20 probes)
+
+| P50 | P95 | P99 | Avg | Min | Max |
+|---|---|---|---|---|---|
+| **4,883 ms** | **4,936 ms** | **4,936 ms** | 4,741 ms | 1,700 ms | 4,936 ms |
+
+#### Ramp-up — tìm ngưỡng bottleneck
+
+| Target | Actual inject | E2E rec/s | Lag cuối inject | Peak lag | Drain rate | Drain time | Spark p50 | Spark p95 | Synced |
+|---|---|---|---|---|---|---|---|---|---|
+| 100 rec/s | 99.8 | **93.6** | 460 | 460 | 229 rec/s | 2.0s | 235 ms | 1,156 ms | ✅ |
+| 500 rec/s | 497.3 | **414.1** | 2,500 | 1,617 | 413 rec/s | 6.1s | 612 ms | 965 ms | ✅ |
+| 1,000 rec/s | 978.9 | **839.4** | 1,250 | 3,320 | 246 rec/s | 5.1s | 693 ms | 2,090 ms | ✅ |
+| 2,000 rec/s | 1,904.9 | **1,636.9** | 2,670 | 9,786 | 520 rec/s | 5.1s | 1,568 ms | 3,033 ms | ✅ |
+| 3,000 rec/s | 2,616.7 | **2,270.3** | 12,414 | 8,400 | 2,385 rec/s | 5.2s | 1,882 ms | 5,464 ms | ✅ |
+| 5,000 rec/s | 3,416.6 | **350.6** ❌ | 47,028 | 18,950 | 45 rec/s | 286.9s | 1,748 ms | 2,488 ms | ❌ |
+
+> **Quan sát quan trọng:**
+> - MySQL cap inject tại ~3,400 rec/s (không inject được 5,000 rec/s → hardware limit)
+> - Pipeline xử lý tốt đến **2,616 rec/s** (3,000 target) — drain chỉ 5.2s
+> - Spark p95 vượt 5s trigger lần đầu tại 3,000 level (5,464 ms) → Spark bắt đầu stress
+> - Tại 5,000 target (3,416 actual): drain rate sụp đổ 2,385 → 45 rec/s → **bottleneck**
+> - Bottleneck stage: `mysql_inject` — MySQL commit speed là giới hạn cứng trên laptop
+
+#### Tóm tắt bottleneck hunting (3 partitions)
+
+| Metric | Giá trị |
+|---|---|
+| **Max E2E records/s** | **2,270.3** (tại inject 3,000 target / 2,617 actual) |
+| **MySQL inject cap** | **~3,400 rec/s** (hardware limit — Windows + Docker + WSL2) |
+| **Bottleneck bắt đầu** | 5,000 target (3,416 actual) — drain không xong trong 5 phút |
+| **Bottleneck stage** | MySQL inject speed (Debezium + Kafka + Spark đều OK) |
+| **Peak Kafka consumer lag** | 18,950 records (tại 5,000 level) |
+| **Spark p95 vượt 5s** | Tại 3,000 rec/s target (5,464 ms) |
+| **E2E Latency P50** | 4,883 ms ≈ ~5s (1 Spark trigger cycle) |
+
 ---
 
 ## 5. So sánh Scala vs Python
@@ -300,11 +341,16 @@ Phần này liệt kê các thông số **chưa có trong benchmark hiện tại
 
 | Thông số | Giá trị |
 |---|---|
-| Max throughput (laptop, 3w, 3p) | **449.1 rec/s** |
-| Sustained throughput (laptop) | **260–312 rec/s** |
+| Max throughput (laptop, 3w, 3p, full) | **1,567.8 rec/s** |
+| Max throughput (laptop, 3w, 3p, bottleneck_hunting) | **2,270.3 rec/s** ← mới |
+| MySQL inject cap (laptop, Docker/WSL2) | **~3,400 rec/s** ← mới |
+| Pipeline bottleneck threshold (laptop, 3p) | **~3,400 rec/s inject** (5000 target FAIL) ← mới |
+| Peak Kafka consumer lag (laptop, 3p, 5000 level) | **18,950 records** ← mới |
+| Sustained throughput (laptop) | **260–312 rec/s** (quick) / **377 rec/s** (full) |
 | Max throughput (VM, 12p, full mode) | **1,633 rec/s** |
 | Sustained (VM, 12p, full mode) | **1,137 rec/s** |
-| Pipeline giới hạn (laptop, 1p, 3w) | ~**1,000 rec/s** (stress test) |
+| Pipeline giới hạn (laptop, 1p, 3w) | ~**1,000 rec/s** (stress test 2026-05-25) |
+| Pipeline giới hạn (laptop, 3p, 3w) | ~**2,600–3,400 rec/s** (bottleneck_hunting 2026-06-05) ← mới |
 | Scala vs Python tỷ lệ | **~5×** |
 | Zero data loss | ✅ Verified mọi run |
 | Kafka consumer lag cuối | **0** mọi run (dưới ngưỡng giới hạn) |
