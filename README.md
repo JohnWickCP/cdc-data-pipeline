@@ -269,24 +269,36 @@ Spark → MongoDB: replaceOne({id:1}, after_data, upsert=true)
 | Kafka | 1 partition |
 | Spark engine | **Scala JAR** (primary) |
 
-### Throughput theo mức tải
+### Throughput theo mức tải (Laptop — quick mode, 1 partition, 3 workers)
 
 | Mức inject | Inject thực | **E2E Throughput** | Spark p50 | Spark p95 | Lag |
 |---|---|---|---|---|---|
-| 100 rec/s | 99.8 rec/s | **92.7 rec/s** | 672 ms | 1,248 ms | 0 |
-| 200 rec/s | 199.5 rec/s | **149.9 rec/s** | 669 ms | 1,088 ms | 0 |
-| 500 rec/s | 497.1 rec/s | **404.3 rec/s** | 770 ms | 1,362 ms | 0 |
-| Sustained 323/s × 30s | — | **273.3 rec/s** | 923 ms | 2,363 ms | 0 |
+| 100 rec/s | 99.8 rec/s | **80.6 rec/s** | 258 ms | 1,132 ms | 0 |
+| 200 rec/s | 199.4 rec/s | **156.0 rec/s** | 493 ms | 998 ms | 0 |
+| 500 rec/s | 497.2 rec/s | **388.8 rec/s** | 697 ms | 1,394 ms | 0 |
+| 1,000 rec/s | 997.5 rec/s | **855.6 rec/s** | 2,142 ms | 4,290 ms | 0 |
+| Sustained 308/s × 30s | — | **260.6 rec/s** | 491 ms | 2,510 ms | 0 |
 
 **E2E Throughput** = số records đến MongoDB ÷ (thời gian inject + thời gian drain hết lag).
+
+### VM Xeon — Full mode (12 partitions, 3 workers)
+
+| Mức inject | **E2E Throughput** | **Sustained** | p50 | p95 | Lag |
+|---|---|---|---|---|---|
+| 500–2,000 rec/s | **~1,485 rec/s** | **~1,029 rec/s** | 1,010 ms | 1,833 ms | 0 |
+
+> Với 12 Kafka partitions + Xeon 16 cores: pipeline xử lý >1,000 rec/s sustained, drain hoàn toàn.
 
 ### Điểm nổi bật
 
 - **Smoke test: 43/43 PASS** — toàn bộ pipeline, monitoring, sync đều hoạt động
 - **Latency ~3 giây** — từ MySQL INSERT đến MongoDB document xuất hiện
 - **Kafka lag = 0** ở mọi mức test — Spark theo kịp real-time
-- **Scala nhanh hơn PySpark ~4.9×** (404 vs 83 rec/s max)
-- **Không bottleneck** phát hiện ở bất kỳ mức nào trong quick mode
+- **Scala nhanh hơn PySpark ~4.9×** (388 vs 83 rec/s max trên laptop)
+- **Ngưỡng bottleneck laptop:** ~1,000 rec/s (1 partition) — trên đó Kafka lag tích lũy
+- **VM full mode:** max 1,633 rec/s, sustained 1,136 rec/s (12 partitions, sustained 10 phút, 0 lag)
+- **Multi-table (customers + orders):** overhead chỉ −1.7% throughput so với single-table
+- **Bottleneck thực:** MySQL concurrent inject cap ~3,400 rec/s — không phải Spark hay Kafka
 
 ### Lưu ý khi đọc con số
 
@@ -394,17 +406,31 @@ Dashboard chính (`uid: cdc-pipeline-main`) gồm các panels:
 **Pipeline chạy đầy đủ — 12 containers healthy:**
 ![Full Pipeline Running](docs/screenshots/01-full-pipeline-running.png)
 
-**Spark Master UI — active streaming job:**
-![Spark Master UI](docs/screenshots/08-spark-master-ui.png)
-
 **Debezium connector RUNNING:**
 ![Debezium Connector](docs/screenshots/03-debezium-connector-running.png)
 
 **Kafka CDC event — INSERT:**
 ![Kafka CDC Insert Event](docs/screenshots/04-kafka-cdc-insert-event.png)
 
+**Spark Master UI — active streaming job:**
+![Spark Master UI](docs/screenshots/08-spark-master-ui.png)
+
 **Redis — customer data sau CDC:**
 ![Redis Customer Data](docs/screenshots/redis-cli-customer-data.png)
+
+**Grafana Dashboard — metrics real-time (records count, lag, batch duration):**
+![Grafana Dashboard](docs/screenshots/07-grafana-dashboard.png)
+
+**Demo Dashboard — live insert rate, real-time chart:**
+![Demo Dashboard](docs/screenshots/11-demo-dashboard.png)
+
+**Benchmark — so sánh throughput nhiều lần chạy:**
+![Benchmark Results](docs/screenshots/10-benchmark-results.png)
+
+> **Ảnh còn thiếu cần chụp:**
+> - `07-grafana-dashboard.png` — mở http://localhost:3000, chụp panel Records Count + Throughput + Kafka Lag
+> - `11-demo-dashboard.png` — mở http://localhost:8888, bấm Start, chụp dashboard đang chạy
+> - `10-benchmark-results.png` — chạy `python benchmark/compare_runs.py -n 5`, chụp bảng kết quả terminal
 
 ---
 
