@@ -478,16 +478,16 @@ Dashboard chính (`uid: cdc-pipeline-main`) gồm các panels:
 ```
 cdc-data-pipeline/
 │
-├── 📄 docker-compose.yml          # 13 containers — toàn bộ stack
-├── 🚀 start.sh                    # Khởi động pipeline (~3-5 phút)
-├── 🛑 stop.sh                     # Dừng pipeline [-v để xóa data]
+├── docker-compose.yml             # 13 containers — toàn bộ stack
+├── start.sh                       # Khởi động pipeline (~3-5 phút)
+├── stop.sh                        # Dừng pipeline [-v để xóa data]
 │
-├── 📁 config/
+├── config/
 │   ├── .env.laptop                # Config cho laptop (≤16GB RAM)
 │   ├── .env.server                # Config cho workstation (≥32GB RAM)
-│   └── .env.vm                   # Config cho cloud VM
+│   └── .env.vm                    # Config cho cloud VM
 │
-├── 📁 scripts/
+├── scripts/
 │   ├── test_smoke.sh              # Smoke test 43 checks
 │   ├── run_bench.sh               # Chạy benchmark [quick|full|stress]
 │   ├── run_scale_test.sh          # Ma trận scaling test (workers × partitions)
@@ -495,12 +495,12 @@ cdc-data-pipeline/
 │       ├── vm_run.sh              # All-in-one launcher cho VM
 │       └── vm_setup.sh            # Cài đặt môi trường VM mới
 │
-├── 📁 jobs/
+├── jobs/
 │   ├── cdc-mysql-to-mongodb-redis_2.12-1.0.jar  ← Scala JAR đã build sẵn
 │   ├── scala/cdc_redis_consumer.scala             ← Source code Scala
 │   └── python/cdc_pipeline.py                     ← PySpark fallback
 │
-├── 📁 demo/
+├── demo/
 │   ├── demo_server.py             # Flask backend (:8888)
 │   ├── index.html                 # Dashboard UI (Chart.js, dark theme)
 │   ├── run_demo.sh / run_demo.bat # Launcher
@@ -511,7 +511,7 @@ cdc-data-pipeline/
 │       ├── init.sql               # MySQL schema khởi tạo
 │       └── demodata.sql           # Sample data
 │
-├── 📁 monitoring/
+├── monitoring/
 │   ├── exporter/
 │   │   └── metrics_exporter.py    # Custom Prometheus exporter (baked image)
 │   ├── prometheus.yml             # Prometheus scrape config
@@ -523,17 +523,16 @@ cdc-data-pipeline/
 │           └── alerting/
 │               └── cdc_alerts.yml # Alert rules (lag, batch duration)
 │
-├── 📁 benchmark/
+├── benchmark/
 │   ├── run_benchmark_v4.py        # Benchmark engine (quick/full/stress/realistic)
 │   ├── compare_runs.py            # So sánh nhiều lần chạy
 │   └── results/
 │       ├── history.jsonl          # Lịch sử tất cả runs (không gitignore)
 │       └── latest_benchmark.json  # Kết quả lần chạy gần nhất
 │
-└── 📁 docs/
+└── docs/
     ├── BENCHMARK_RESULTS.md       # Kết quả đo lường chi tiết
     ├── CLARIFICATIONS.md          # Giải thích khái niệm (TPS, records/s, drain...)
-    ├── DEMO_SCRIPT.md             # Kịch bản demo cho hội đồng
     ├── LESSONS_LEARNED.md         # Các vấn đề thực tế gặp phải và cách fix
     ├── KNOWN_ISSUES.md            # Vấn đề đã biết + trạng thái
     ├── SPARK_SETUP.md             # Hướng dẫn rebuild Scala JAR

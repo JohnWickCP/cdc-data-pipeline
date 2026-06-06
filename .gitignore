@@ -1,6 +1,13 @@
 CLAUDE.md
+TASKS.md
+NEXT_SESSION_PROMPT.md
+docs/AI_GUIDE.md
 docs/DEFENSE_QA.md
 docs/PRESENTATION_SCRIPT.md
+docs/DEMO_SCRIPT.md
+docs/DEMO_SCENARIO.md
+docs/STRESS_TEST_GUIDE.md
+docs/benchmark_comparison.html
 DEMO_GUIDE_LOCAL.md
 *.log
 *.bak
